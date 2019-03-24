@@ -1,12 +1,12 @@
 extern crate slog_term;
 extern crate slog_async;
-extern crate rustmania_gfx;
+extern crate rmge;
 #[macro_use]
 extern crate slog;
 
 use slog::Drain;
 
-use rustmania_gfx::{WindowState, HalState};
+use rmge::{WindowState, HalState, Triangle, Point2D};
 use winit::{EventsLoop, WindowBuilder, Window, WindowEvent, Event};
 
 #[derive(Debug, Clone, Default)]
@@ -63,6 +63,7 @@ impl LocalState {
         }
     }
 }
+
 fn do_the_render(hal_state: &mut HalState, local_state: &LocalState) -> Result<(), &'static str> {
     let r = (local_state.mouse_x / local_state.frame_width) as f32;
     let g = (local_state.mouse_y / local_state.frame_height) as f32;
@@ -71,39 +72,58 @@ fn do_the_render(hal_state: &mut HalState, local_state: &LocalState) -> Result<(
     hal_state.draw_clear_frame([r, g, b, a])
 }
 
-fn main() {
-    // slog setup
-    let decorator = slog_term::PlainDecorator::new(std::io::stdout());
-    let drain = slog_term::CompactFormat::new(decorator).build().fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
+fn do_the_triangle_render(hal_state: &mut HalState, local_state: &LocalState) -> Result<(), &'static str> {
+    let x = ((local_state.mouse_x / local_state.frame_width) * 2.0) - 1.0;
+    let y = ((local_state.mouse_y / local_state.frame_height) * 2.0) - 1.0;
+    let triangle: [[f32; 2]; 3] = [[-0.5, 0.5], [-0.5, -0.5], [x as f32, y as f32]];
+    hal_state.draw_triangle_frame(Triangle::from(triangle).vertex_attributes())
+}
 
-    let log = slog::Logger::root(drain, o!("version" => "0.1"));
+    fn main() {
+        // slog setup
+        let decorator = slog_term::PlainDecorator::new(std::io::stdout());
+        let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
 
-    let mut winit_state = WindowState::new("rustmania", (800.0, 600.0), Some(log.new(o!("child" => 1)))).expect("failed to create window");
-    let mut hal_state = match HalState::new(winit_state.get_window(), "rustmania", log.new(o!("child" => 2))) {
-        Ok(state) => state,
-        Err(e) => panic!(e),
-    };
-    let (frame_width, frame_height) = winit_state
-        .get_window()
-        .get_inner_size()
-        .map(|logical| logical.into())
-        .unwrap_or((0.0, 0.0));
-    let mut local_state = LocalState {
-        frame_width,
-        frame_height,
-        mouse_x: 0.0,
-        mouse_y: 0.0,
-    };
-    loop {
-        let inputs = UserInput::poll_events_loop(winit_state.get_events_loop_mut());
-        if inputs.end_requested {
-            break;
-        }
-        local_state.update_from_input(inputs);
-        if let Err(e) = do_the_render(&mut hal_state, &local_state) {
-            error!(log, "render error"; "render_error" => e);
-            break
+        let log = slog::Logger::root(drain, o!("version" => "0.1"));
+
+        let mut winit_state = WindowState::new("rustmania", (800.0, 600.0), Some(log.new(o!("child" => 1)))).expect("failed to create window");
+        let mut hal_state = match HalState::new(&winit_state) {
+            Ok(state) => state,
+            Err(e) => panic!(e),
+        };
+        let (frame_width, frame_height) = winit_state
+            .get_window()
+            .get_inner_size()
+            .map(|logical| logical.into())
+            .unwrap_or((0.0, 0.0));
+        let mut local_state = LocalState {
+            frame_width,
+            frame_height,
+            mouse_x: 0.0,
+            mouse_y: 0.0,
+        };
+        loop {
+            let inputs = UserInput::poll_events_loop(winit_state.get_events_loop_mut());
+            if inputs.end_requested {
+                break;
+            }
+            if let Some(a) = inputs.new_frame_size {
+                debug!(log, "Window changed size"; o!("x" => a.0, "y" => a.1));
+                core::mem::drop(hal_state);
+                hal_state = match HalState::new(&winit_state) {
+                    Ok(state) => state,
+                    Err(e) => panic!(e),
+                };
+            }
+            local_state.update_from_input(inputs);
+            if let Err(e) = do_the_triangle_render(&mut hal_state, &local_state) {
+                error!(log, "render error"; "render_error" => e);
+                debug!(log, "Auto-restarting HalState...");
+                hal_state = match HalState::new(&winit_state) {
+                    Ok(state) => state,
+                    Err(e) => panic!(e),
+                };
+            }
         }
     }
-}
