@@ -17,6 +17,7 @@ arrayvec = "0.4"
 slog = "2.4.1"
 slog-stdlog = "3.0.2"
 shaderc = "0.3"
+image = "0.21"
 
 [dependencies.gfx-backend-vulkan]
 version = "0.1"

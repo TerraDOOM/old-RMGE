@@ -4,13 +4,16 @@ pub extern crate slog;
 extern crate slog_stdlog;
 
 mod halstate;
+pub mod geometry;
 
 pub use halstate::HalState;
 
+use gfx_hal::Device;
 use slog::Drain;
 use winit::{EventsLoop, WindowBuilder, Window, dpi::LogicalSize, Event, DeviceEvent, KeyboardInput};
 use std::sync::mpsc::{self, Sender};
 use std::time::Instant;
+use std::marker::PhantomData;
 
 #[derive(Debug)]
 pub struct WindowState {
@@ -54,63 +57,8 @@ impl WindowState {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct Triangle {
-    points: [Point2D; 3]
+pub enum Vsync {
+    TripleBuffered,
+    DoubleBuffered,
+    None,
 }
-
-impl Triangle {
-    pub fn points_flat(self) -> [f32; 6] {
-        let [[a, b], [c, d], [e, f]]: [[f32; 2]; 3] = self.into();
-        [a, b, c, d, e, f]
-    }
-
-    pub fn vertex_attributes(self) -> [f32; 3 * (2 + 3)] {
-        let [[a, b], [c, d], [e, f]]: [[f32; 2]; 3] = self.into();
-        [
-            a, b, 1.0, 0.0, 0.0,
-            c, d, 0.0, 1.0, 0.0,
-            e, f, 0.0, 0.0, 1.0,
-        ]
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct Point2D {
-    x: f32,
-    y: f32,
-}
-
-impl Into<[f32; 2]> for Point2D {
-    #[inline]
-    fn into(self) -> [f32; 2] {
-        [self.x, self.y]
-    }
-}
-
-impl From<[f32; 2]> for Point2D {
-    #[inline]
-    fn from(arr: [f32; 2]) -> Point2D {
-        let [x, y] = arr;
-        Point2D {
-            x, y
-        }
-    }
-}
-
-impl Into<[[f32; 2]; 3]> for Triangle {
-    #[inline]
-    fn into(self) -> [[f32; 2]; 3] {
-        let [a, b, c] = self.points;
-        [a.into(), b.into(), c.into()]
-    }
-}
-
-impl From<[[f32; 2]; 3]> for Triangle {
-    #[inline]
-    fn from(arr: [[f32; 2]; 3]) -> Triangle {
-        let [a, b, c] = arr;
-        Triangle { points: [a.into(), b.into(), c.into()] }
-    }
-}
-

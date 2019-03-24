@@ -6,7 +6,7 @@ extern crate slog;
 
 use slog::Drain;
 
-use rmge::{WindowState, HalState, geometry::{Quad, Point2D}};
+use rmge::{WindowState, HalState, Triangle, Point2D};
 use winit::{EventsLoop, WindowBuilder, Window, WindowEvent, Event};
 
 #[derive(Debug, Clone, Default)]
@@ -72,18 +72,20 @@ fn do_the_render(hal_state: &mut HalState, local_state: &LocalState) -> Result<(
     hal_state.draw_clear_frame([r, g, b, a])
 }
 
-fn do_the_quad_render(hal_state: &mut HalState, local_state: &LocalState) -> Result<(), &'static str> {
-    let x1 = 100.0;
-    let y1 = 100.0;
-    let x2 = local_state.mouse_x as f32;
-    let y2 = local_state.mouse_y as f32;
-    let quad = Quad {
-        x: (x1 / local_state.frame_width as f32) * 2.0 - 1.0,
-        y: (y1 / local_state.frame_height as f32) * 2.0 - 1.0,
-        w: ((x2 - x1) / local_state.frame_width as f32) * 2.0,
-        h: ((y2 - y1) / local_state.frame_height as f32) * 2.0,
-    };
-    hal_state.draw_quad_frame(quad.vertex_attributes())
+impl Coords {
+    /// coordinates in terms of logical pixels to the [-1, 1] interval that gfx uses
+    fn to_gfx_coords(self) -> (f64, f64) {
+        let WindowSize { height, width } = self.window_size;
+        let (x, y) = self.coordinates;
+        (x / width - 1.0, y / height - 1.0)
+    }
+}
+
+fn do_the_triangle_render(hal_state: &mut HalState, local_state: &LocalState) -> Result<(), &'static str> {
+    let x = ((local_state.mouse_x / local_state.frame_width) * 2.0) - 1.0;
+    let y = ((local_state.mouse_y / local_state.frame_height) * 2.0) - 1.0;
+    let triangle: [[f32; 2]; 3] = [[-0.5, 0.5], [-0.5, -0.5], [x as f32, y as f32]];
+    hal_state.draw_triangle_frame(Triangle::from(triangle).vertex_attributes())
 }
 
 fn main() {
@@ -124,7 +126,7 @@ fn main() {
             };
         }
         local_state.update_from_input(inputs);
-        if let Err(e) = do_the_quad_render(&mut hal_state, &local_state) {
+        if let Err(e) = do_the_render(&mut hal_state, &local_state) {
             error!(log, "render error"; "render_error" => e);
             debug!(log, "Auto-restarting HalState...");
             hal_state = match HalState::new(&winit_state) {
