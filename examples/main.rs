@@ -98,7 +98,7 @@ fn do_the_quad_render(hal_state: &mut HalState, local_state: &LocalState) -> Res
     };
     let textured_quad2 = TexturedQuad {
         quad: quad_2,
-        uv_rect: [0.0, 0.0, 150.0, 300.0],
+        uv_rect: [75.0, 0.0, 150.0, 300.0],
     };
 
     hal_state.draw_quad_frame(&[textured_quad, textured_quad2])

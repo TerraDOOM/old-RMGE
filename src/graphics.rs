@@ -54,18 +54,16 @@ pub struct TexturedQuad {
 }
 
 impl TexturedQuad {
-    pub(crate) fn to_f32s(self) -> [f32; 4 * (2 + 3 + 2) + 4] {
+    pub(crate) fn to_f32s(self) -> [f32; 4 * (2 + 3 + 2 + 4)] {
         let [uvx, uvy, uvz, uvw] = self.uv_rect;
         let Quad { x, y, w, h } = self.quad;
         #[cfg_attr(rustfmt, rustfmt_skip)]
         [/*
-         X    Y    R    G    B                  U    V                    */
-         x  , y+h, 1.0, 0.0, 0.0, /* red     */ 0.0, 1.0, /* bottom left  */
-         x  , y  , 0.0, 1.0, 0.0, /* green   */ 0.0, 0.0, /* top left     */
-         x+w, y  , 0.0, 0.0, 1.0, /* blue    */ 1.0, 0.0, /* bottom right */
-         x+w, y+h, 1.0, 0.0, 1.0, /* magenta */ 1.0, 1.0, /* top right    */
-         /* uv_rect */
-         uvx, uvy, uvz, uvw,
+         X    Y    R    G    B                  U    V                    */ /* uv_rect       */
+         x  , y+h, 1.0, 0.0, 0.0, /* red     */ 0.0, 1.0, /* bottom left  */ uvx, uvy, uvz, uvw,
+         x  , y  , 0.0, 1.0, 0.0, /* green   */ 0.0, 0.0, /* top left     */ uvx, uvy, uvz, uvw,
+         x+w, y  , 0.0, 0.0, 1.0, /* blue    */ 1.0, 0.0, /* bottom right */ uvx, uvy, uvz, uvw,
+         x+w, y+h, 1.0, 0.0, 1.0, /* magenta */ 1.0, 1.0, /* top right    */ uvx, uvy, uvz, uvw,
         ]
     }
     pub fn to_vertices(self) -> [Vertex; 4] {
@@ -76,21 +74,25 @@ impl TexturedQuad {
                 xy: [x, y + h],
                 rgb: [1.0, 0.0, 0.0],
                 uv: [0.0, 1.0],
+                uv_rect,
             },
             Vertex {
                 xy: [x, y],
                 rgb: [0.0, 1.0, 0.0],
                 uv: [0.0, 0.0],
+                uv_rect,
             },
             Vertex {
                 xy: [x + w, y],
                 rgb: [0.0, 0.0, 1.0],
                 uv: [1.0, 0.0],
+                uv_rect,
             },
             Vertex {
                 xy: [x + w, y + h],
                 rgb: [1.0, 0.0, 1.0],
                 uv: [1.0, 1.0],
+                uv_rect,
             },
         ]
     }
@@ -366,6 +368,7 @@ pub struct Vertex {
     xy: [f32; 2],
     rgb: [f32; 3],
     uv: [f32; 2],
+    uv_rect: [f32; 4],
 }
 impl Vertex {
     pub fn attributes() -> Vec<AttributeDesc> {
@@ -397,15 +400,15 @@ impl Vertex {
                 offset: (POSITION_ATTR_SIZE + COLOR_ATTR_SIZE) as ElemOffset,
             },
         };
-        /*let uv_rect_attribute = AttributeDesc {
-        location: 3,
-        binding: 0,
-        element: Element {
-        format: Format::Rgba32Float,
-        offset: (POSITION_ATTR_SIZE + COLOR_ATTR_SIZE + UV_ATTR_SIZE) as ElemOffset,
-    }
-    };*/
-        vec![position_attribute, color_attribute, uv_attribute]
+        let uv_rect_attribute = AttributeDesc {
+            location: 3,
+            binding: 0,
+            element: Element {
+                format: Format::Rgba32Float,
+                offset: (POSITION_ATTR_SIZE + COLOR_ATTR_SIZE + UV_ATTR_SIZE) as ElemOffset,
+            }
+        };
+        vec![position_attribute, color_attribute, uv_attribute, uv_rect_attribute]
     }
     pub fn to_array(self) -> [f32; 2 + 3 + 2] {
         let [x, y] = self.xy;
@@ -735,7 +738,7 @@ impl HalState {
         // 6. You actually bind the descriptor set in the command buffer before
         //    the draw call using bind_graphics_descriptor_sets
 
-        const F32_XY_RGB_UV_UVRECT_QUAD: usize = mem::size_of::<f32>() * (2 + 3 + 2 + 4) * 4;
+        const F32_XY_RGB_UV_UVRECT_QUAD: usize = mem::size_of::<Vertex>() * 4;
         let vertices = BufferBundle::new(
             &adapter,
             &device,
@@ -895,9 +898,9 @@ impl HalState {
                 )
                 .map_err(|_| "Failed to acquire a memory writer!")?;
             for i in 0..textured_quads.len().min(MAX_QUADS) {
-                let stride = (2 + 3 + 2) * 4;
+                let stride = mem::size_of::<Vertex>()/mem::size_of::<f32>() * 4;
                 data_target[stride * i..stride * (i + 1)]
-                    .copy_from_slice(&textured_quads[i].quad.vertex_attributes());
+                    .copy_from_slice(&textured_quads[i].to_f32s());
             }
             self.device
                 .release_mapping_writer(data_target)
@@ -1046,20 +1049,11 @@ impl HalState {
         };
         let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
             binding: 0,
-            stride: (mem::size_of::<f32>() * (2 + 3 + 2)) as ElemStride,
+            stride: (mem::size_of::<f32>() * (2 + 3 + 2 + 4)) as ElemStride,
             rate: 0,
         }];
 
         let mut attributes: Vec<AttributeDesc> = Vertex::attributes();
-        // NOTE: uv_rect
-        /*attributes.push(AttributeDesc {
-            location: 3,
-            binding: 0,
-            element: Element {
-            format: Format::Rgba32Float,
-            offset: mem::size_of::<[f32; 4 * (2 + 3 + 2)]>() as ElemOffset,
-        }
-        }); */
 
         let rasterizer = Rasterizer {
             depth_clamping: false,

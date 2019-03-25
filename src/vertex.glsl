@@ -8,6 +8,7 @@ layout (push_constant) uniform PushConsts {
 layout (location = 0) in vec2 position;
 layout (location = 1) in vec3 color;
 layout (location = 2) in vec2 vert_uv;
+layout (location = 3) in vec4 uv_rect;
 
 layout (location = 0) out gl_PerVertex {
   vec4 gl_Position;
@@ -22,7 +23,7 @@ void main()
   gl_Position = vec4(position, 0.0, 1.0);
   frag_color = color;
 
-  vec4 uv_rect = push.uv_rect;
+  vec4 uv_rect = uv_rect;
 
   if (uv_rect == vec4(0.0, 0.0, 0.0, 0.0)) {
     uv_rect = vec4(0.0, 0.0, float(tex_size.x), float(tex_size.y));
