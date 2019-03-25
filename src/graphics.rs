@@ -75,26 +75,22 @@ impl TexturedQuad {
                 xy: [x, y+h],
                 rgb: [1.0, 0.0, 0.0],
                 uv: [0.0, 1.0],
-                uv_rect,
             },
             Vertex {
                 xy: [x, y],
                 rgb: [0.0, 1.0, 0.0],
                 uv: [0.0, 0.0],
-                uv_rect,
             },
             Vertex {
                 xy: [x+w, y],
                 rgb: [0.0, 0.0, 1.0],
                 uv: [1.0, 0.0],
-                uv_rect,
-            },
+             },
             Vertex {
                 xy: [x+w, y+h],
                 rgb: [1.0, 0.0, 1.0],
                 uv: [1.0, 1.0],
-                uv_rect,
-            },
+             },
         ]
     }
 }
@@ -369,7 +365,6 @@ pub struct Vertex {
     xy: [f32; 2],
     rgb: [f32; 3],
     uv: [f32; 2],
-    uv_rect: [f32; 4],
 }
 impl Vertex {
     pub fn attributes() -> Vec<AttributeDesc> {
@@ -401,22 +396,22 @@ impl Vertex {
                 offset: (POSITION_ATTR_SIZE + COLOR_ATTR_SIZE) as ElemOffset,
             },
         };
-        let uv_rect_attribute = AttributeDesc {
-            location: 3,
-            binding: 0,
-            element: Element {
-                format: Format::Rgba32Float,
-                offset: (POSITION_ATTR_SIZE + COLOR_ATTR_SIZE + UV_ATTR_SIZE) as ElemOffset,
-            }
-        };
-        vec![position_attribute, color_attribute, uv_attribute, uv_rect_attribute]
+        /*let uv_rect_attribute = AttributeDesc {
+        location: 3,
+        binding: 0,
+        element: Element {
+        format: Format::Rgba32Float,
+        offset: (POSITION_ATTR_SIZE + COLOR_ATTR_SIZE + UV_ATTR_SIZE) as ElemOffset,
     }
-    pub fn to_array(self) -> [f32; 2 + 3 + 2 + 4] {
+    };*/
+        vec![position_attribute, color_attribute, uv_attribute]
+    }
+    pub fn to_array(self) -> [f32; 2 + 3 + 2] {
         let [x, y] = self.xy;
         let [r, g, b] = self.rgb;
         let [u, v] = self.uv;
-        let [ur_x, ur_y, ur_z, ur_w] = self.uv_rect;
-        [ x, y, r, g, b, u, v, ur_x, ur_y, ur_z, ur_w ]
+        //let [ur_x, ur_y, ur_z, ur_w] = self.uv_rect;
+        [ x, y, r, g, b, u, v ] //ur_x, ur_y, ur_z, ur_w ]
     }
 }
 
@@ -886,7 +881,7 @@ impl HalState {
                 .map_err(|_| "Failed to acquire a memory writer!")?;
             let quad_vertices = textured_quad.to_vertices();
             for i in 0..quad_vertices.len() {
-                data_target[(2 + 3 + 2 + 4) * i..(2 + 3 + 2 + 4) * (i+1)].copy_from_slice(&quad_vertices[i].to_array());
+                data_target[(2 + 3 + 2) * i..(2 + 3 + 2) * (i+1)].copy_from_slice(&quad_vertices[i].to_array());
             }
             self.device
                 .release_mapping_writer(data_target)
@@ -895,6 +890,7 @@ impl HalState {
 
         let duration = Instant::now().duration_since(self.creation_instant);
         let time_f32 = duration.as_secs() as f32 + duration.subsec_nanos() as f32 * 1e-9;
+        let uv_rect = textured_quad.uv_rect;
         // record commands
         unsafe {
             let buffer = &mut self.command_buffers[i_usize];
@@ -923,6 +919,12 @@ impl HalState {
                     0,
                     Some(self.descriptor_set.deref()),
                     &[],
+                );
+                encoder.push_graphics_constants(
+                    &self.pipeline_layout,
+                    ShaderStageFlags::VERTEX,
+                    0,
+                    &[uv_rect[0].to_bits(), uv_rect[1].to_bits(), uv_rect[2].to_bits(), uv_rect[3].to_bits()]
                 );
                 encoder.push_graphics_constants(
                     &self.pipeline_layout,
@@ -1030,7 +1032,7 @@ impl HalState {
         };
         let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
             binding: 0,
-            stride: (mem::size_of::<f32>() * (2 + 3 + 2 + 4)) as ElemStride,
+            stride: (mem::size_of::<f32>() * (2 + 3 + 2)) as ElemStride,
             rate: 0,
         }];
 
@@ -1113,7 +1115,7 @@ impl HalState {
                     .map_err(|_| "Couldn't make a DescriptorSetLayout")?
             }];
 
-        let push_constants = vec![(ShaderStageFlags::FRAGMENT, 0..1)];
+        let push_constants = vec![(ShaderStageFlags::VERTEX, 0..5), (ShaderStageFlags::FRAGMENT, 0..1)];
         let layout = unsafe {
             device
                 .create_pipeline_layout(&descriptor_set_layouts, push_constants)

@@ -1,11 +1,13 @@
 #version 450
 layout (set = 0, binding = 0) uniform texture2D tex;
 layout (set = 0, binding = 1) uniform sampler samp;
+layout (push_constant) uniform PushConsts {
+  vec4 uv_rect;
+} push;
 
 layout (location = 0) in vec2 position;
 layout (location = 1) in vec3 color;
 layout (location = 2) in vec2 vert_uv;
-layout (location = 3) in vec4 uv_rect;
 
 layout (location = 0) out gl_PerVertex {
   vec4 gl_Position;
@@ -20,13 +22,12 @@ void main()
   gl_Position = vec4(position, 0.0, 1.0);
   frag_color = color;
 
-  vec4 uv_rect = uv_rect;
+  vec4 uv_rect = push.uv_rect;
 
   if (uv_rect == vec4(0.0, 0.0, 0.0, 0.0)) {
-    uv_rect = vec4(0.0, 0.0, 0.5*float(tex_size.x), 0.5*float(tex_size.y));
+    uv_rect = vec4(0.0, 0.0, float(tex_size.x), float(tex_size.y));
   }
 
-  //vec4 uv_rect = vec4(150.0, 150.0, 300.0, 300.0);
   vec2 x_scale = vec2(uv_rect.x, uv_rect.z) / float(tex_size.x);
   vec2 y_scale = vec2(uv_rect.y, uv_rect.w) / float(tex_size.y);
 
