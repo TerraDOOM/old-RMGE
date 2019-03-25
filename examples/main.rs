@@ -83,11 +83,25 @@ fn do_the_quad_render(hal_state: &mut HalState, local_state: &LocalState) -> Res
         w: ((x2 - x1) / local_state.frame_width as f32) * 2.0,
         h: ((y2 - y1) / local_state.frame_height as f32) * 2.0,
     };
+    let quad_2 = {
+        let Quad { x, y, w, h } = quad;
+        Quad {
+            x: x + 0.5,
+            y: y - 0.5,
+            w,
+            h
+        }
+    };
     let textured_quad = TexturedQuad {
         quad,
         uv_rect: [0.0, 0.0, 150.0, 300.0],
     };
-    hal_state.draw_quad_frame(textured_quad)
+    let textured_quad2 = TexturedQuad {
+        quad: quad_2,
+        uv_rect: [0.0, 0.0, 150.0, 300.0],
+    };
+
+    hal_state.draw_quad_frame(&[textured_quad, textured_quad2])
 }
 
 fn main() {
