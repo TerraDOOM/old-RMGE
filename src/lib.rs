@@ -3,10 +3,10 @@ extern crate winit;
 pub extern crate slog;
 extern crate slog_stdlog;
 
-mod halstate;
+pub mod graphics;
 pub mod geometry;
 
-pub use halstate::HalState;
+pub use graphics::HalState;
 
 use gfx_hal::Device;
 use slog::Drain;

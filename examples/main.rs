@@ -6,7 +6,7 @@ extern crate slog;
 
 use slog::Drain;
 
-use rmge::{WindowState, HalState, geometry::{Quad, Point2D}};
+use rmge::{WindowState, HalState, geometry::Quad, graphics::TexturedQuad};
 use winit::{EventsLoop, WindowBuilder, Window, WindowEvent, Event};
 
 #[derive(Debug, Clone, Default)]
@@ -83,7 +83,11 @@ fn do_the_quad_render(hal_state: &mut HalState, local_state: &LocalState) -> Res
         w: ((x2 - x1) / local_state.frame_width as f32) * 2.0,
         h: ((y2 - y1) / local_state.frame_height as f32) * 2.0,
     };
-    hal_state.draw_quad_frame(quad.vertex_attributes())
+    let textured_quad = TexturedQuad {
+        quad,
+        uv_rect: [0.0, 0.0, 150.0, 300.0],
+    };
+    hal_state.draw_quad_frame(textured_quad)
 }
 
 fn main() {
