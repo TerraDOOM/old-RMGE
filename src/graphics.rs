@@ -450,7 +450,7 @@ pub struct HalState {
 }
 
 impl HalState {
-    pub fn new(window: &crate::WindowState) -> Result<Self, &'static str> {
+    pub fn new(window: &crate::WindowState, texture: &[u8]) -> Result<Self, &'static str> {
         let logger = window.logger.new(o!("window" => "halstate"));
         let instance = back::Instance::create(&window.window_name, 1);
         let mut surface = instance.create_surface(&window.window);
@@ -708,7 +708,7 @@ impl HalState {
             &device,
             &mut command_pool,
             &mut queue_group.queues[0],
-            image::load_from_memory(CREATURE_BYTES)
+            image::load_from_memory(texture)
                 .expect("Binary corrupted!")
                 .to_rgba(),
         )?;
@@ -1069,20 +1069,21 @@ impl HalState {
             stencil: StencilTest::Off,
         };
         let blender = {
-            let blend_state = BlendState::On {
-                color: BlendOp::Add {
-                    src: Factor::One,
+            // stuff that we were using before but yeah
+            /* let blend_state = BlendState::On {
+            color: BlendOp::Add {
+            src: Factor::One,
                     dst: Factor::Zero,
                 },
                 alpha: BlendOp::Add {
-                    src: Factor::One,
-                    dst: Factor::Zero,
+                src: Factor::One,
+                dst: Factor::Zero,
                 },
-            };
-            BlendDesc {
-                logic_op: Some(LogicOp::Copy),
-                targets: vec![ColorBlendDesc(ColorMask::ALL, blend_state)],
-            }
+        };*/
+                BlendDesc {
+                    logic_op: Some(LogicOp::Copy),
+                    targets: vec![ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA)],
+                }
         };
         let baked_states = BakedStates {
             viewport: Some(Viewport {
