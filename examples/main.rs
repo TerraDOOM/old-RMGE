@@ -115,7 +115,7 @@ fn main() {
     let log = slog::Logger::root(drain, o!("version" => "0.1"));
 
     let mut winit_state = WindowState::new("rustmania", (800.0, 600.0), Some(log.new(o!("child" => 1)))).expect("failed to create window");
-    let mut hal_state = match HalState::new(&winit_state, JUDGEMENT_BYTES) {
+    let mut hal_state = match HalState::new(&winit_state, JUDGEMENT_BYTES, Some(1)) {
         Ok(state) => state,
         Err(e) => panic!(e),
     };
@@ -138,7 +138,7 @@ fn main() {
         if let Some(a) = inputs.new_frame_size {
             debug!(log, "Window changed size"; o!("x" => a.0, "y" => a.1));
             core::mem::drop(hal_state);
-            hal_state = match HalState::new(&winit_state, JUDGEMENT_BYTES) {
+            hal_state = match HalState::new(&winit_state, JUDGEMENT_BYTES, Some(1)) {
                 Ok(state) => state,
                 Err(e) => panic!(e),
             };
@@ -147,7 +147,7 @@ fn main() {
         if let Err(e) = do_the_quad_render(&mut hal_state, &local_state) {
             error!(log, "render error"; "render_error" => e);
             debug!(log, "Auto-restarting HalState...");
-            hal_state = match HalState::new(&winit_state, JUDGEMENT_BYTES) {
+            hal_state = match HalState::new(&winit_state, JUDGEMENT_BYTES, Some(1)) {
                 Ok(state) => state,
                 Err(e) => panic!(e),
             };

@@ -7,6 +7,13 @@ use gfx_backend_metal as back;
 #[cfg(feature = "vulkan")]
 use gfx_backend_vulkan as back;
 
+mod vertex;
+mod gpu_buffer;
+mod loadedimage;
+
+use loadedimage::LoadedImage;
+use gpu_buffer::BufferBundle;
+use vertex::Vertex;
 use crate::geometry::Quad;
 use arrayvec::ArrayVec;
 use core::{
@@ -41,10 +48,9 @@ use gfx_hal::{
 };
 use std::time::Instant;
 
-const MAX_QUADS: usize = 512;
+const MAX_QUADS: usize = 4096;
 const VERTEX_SOURCE: &str = include_str!("vertex.glsl");
 const FRAGMENT_SOURCE: &str = include_str!("fragment.glsl");
-static CREATURE_BYTES: &[u8] = include_bytes!("creature-smol.png");
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -98,329 +104,9 @@ impl TexturedQuad {
     }
 }
 
-pub struct BufferBundle<B: Backend, D: Device<B>> {
-    pub buffer: ManuallyDrop<B::Buffer>,
-    pub requirements: Requirements,
-    pub memory: ManuallyDrop<B::Memory>,
-    pub phantom: PhantomData<D>,
-}
-
-pub struct LoadedImage<B: Backend, D: Device<B>> {
-    pub image: ManuallyDrop<B::Image>,
-    pub requirements: Requirements,
-    pub memory: ManuallyDrop<B::Memory>,
-    pub image_view: ManuallyDrop<B::ImageView>,
-    pub sampler: ManuallyDrop<B::Sampler>,
-    pub phantom: PhantomData<D>,
-}
-
-impl<B: Backend, D: Device<B>> BufferBundle<B, D> {
-    pub fn new(
-        adapter: &Adapter<B>,
-        device: &D,
-        size: usize,
-        usage: BufferUsage,
-    ) -> Result<Self, &'static str> {
-        unsafe {
-            let mut buffer = device
-                .create_buffer(size as u64, usage)
-                .map_err(|_| "Couldn't create a buffer!")?;
-            let requirements = device.get_buffer_requirements(&buffer);
-            let memory_type_id = adapter
-                .physical_device
-                .memory_properties()
-                .memory_types
-                .iter()
-                .enumerate()
-                .find(|&(id, memory_type)| {
-                    requirements.type_mask & (1 << id) != 0
-                        && memory_type.properties.contains(Properties::CPU_VISIBLE)
-                })
-                .map(|(id, _)| MemoryTypeId(id))
-                .ok_or("Couldn't find a memory type to support the vertex buffer")?;
-            let memory = device
-                .allocate_memory(memory_type_id, requirements.size)
-                .map_err(|_| "Couldn't allocate buffer memory!")?;
-            device
-                .bind_buffer_memory(&memory, 0, &mut buffer)
-                .map_err(|_| "Couldn't bind the buffer memory!")?;
-            Ok(BufferBundle {
-                buffer: ManuallyDrop::new(buffer),
-                requirements,
-                memory: ManuallyDrop::new(memory),
-                phantom: PhantomData,
-            })
-        }
-    }
-
-    pub unsafe fn manually_drop(&self, device: &D) {
-        use core::ptr::read;
-        device.destroy_buffer(ManuallyDrop::into_inner(read(&self.buffer)));
-        device.free_memory(ManuallyDrop::into_inner(read(&self.memory)));
-    }
-}
-
-impl<B: Backend, D: Device<B>> LoadedImage<B, D> {
-    pub fn new<C: Capability + Supports<Transfer>>(
-        adapter: &Adapter<B>,
-        device: &D,
-        command_pool: &mut CommandPool<B, C>,
-        command_queue: &mut CommandQueue<B, C>,
-        img: image::RgbaImage,
-    ) -> Result<Self, &'static str> {
-        unsafe {
-            let pixel_size = mem::size_of::<image::Rgba<u8>>();
-            let row_size = pixel_size * (img.width() as usize);
-            let limits = adapter.physical_device.limits();
-            let row_alignment_mask = limits.min_buffer_copy_pitch_alignment as u32 - 1;
-            let row_pitch = ((row_size as u32 + row_alignment_mask) & !row_alignment_mask) as usize;
-            debug_assert!(row_pitch as usize >= row_size);
-
-            // 1. make a staging buffer with enough memory for the image, and a
-            //    transfer_src usage
-            let required_bytes = row_pitch * img.height() as usize;
-            let staging_bundle =
-                BufferBundle::new(&adapter, device, required_bytes, BufferUsage::TRANSFER_SRC)?;
-
-            // 2. use mapping writer to put the image data into that buffer
-            let mut writer = device
-                .acquire_mapping_writer::<u8>(
-                    &staging_bundle.memory,
-                    0..staging_bundle.requirements.size,
-                )
-                .map_err(|_| "Failed to acquire a mapping writer to the staging buffer!")?;
-            for y in 0..img.height() as usize {
-                let row = &(*img)[y * row_size..(y + 1) * row_size];
-                let dest_base = y * row_pitch;
-                writer[dest_base..dest_base + row.len()].copy_from_slice(row);
-            }
-            device
-                .release_mapping_writer(writer)
-                .map_err(|_| "Couldn't release the mapping writer to the staging buffer!")?;
-
-            // 3. Make an image with transfer_dst and SAMPLED usage
-            let mut the_image = device
-                .create_image(
-                    gfx_hal::image::Kind::D2(img.width(), img.height(), 1, 1),
-                    1,
-                    Format::Rgba8Srgb,
-                    gfx_hal::image::Tiling::Optimal,
-                    gfx_hal::image::Usage::TRANSFER_DST | gfx_hal::image::Usage::SAMPLED,
-                    gfx_hal::image::ViewCapabilities::empty(),
-                )
-                .map_err(|_| "Couldn't create the image!")?;
-
-            // 4. allocate memory for the image and bind it
-            let requirements = device.get_image_requirements(&the_image);
-            let memory_type_id = adapter
-                .physical_device
-                .memory_properties()
-                .memory_types
-                .iter()
-                .enumerate()
-                .find(|&(id, memory_type)| {
-                    // BIG NOTE: THIS IS DEVICE LOCAL NOT CPU VISIBLE
-                    requirements.type_mask & (1 << id) != 0
-                        && memory_type.properties.contains(Properties::DEVICE_LOCAL)
-                })
-                .map(|(id, _)| MemoryTypeId(id))
-                .ok_or("Couldn't find memory type to support the image!")?;
-            let memory = device
-                .allocate_memory(memory_type_id, requirements.size)
-                .map_err(|_| "Couldn't allocate image memory!")?;
-            device
-                .bind_image_memory(&memory, 0, &mut the_image)
-                .map_err(|_| "Couldn't bind the image memory!")?;
-
-            // 5. create image view and sampler
-            let image_view = device
-                .create_image_view(
-                    &the_image,
-                    gfx_hal::image::ViewKind::D2,
-                    Format::Rgba8Srgb,
-                    gfx_hal::format::Swizzle::NO,
-                    SubresourceRange {
-                        aspects: Aspects::COLOR,
-                        levels: 0..1,
-                        layers: 0..1,
-                    },
-                )
-                .map_err(|_| "Couldn't create the image view!")?;
-            let sampler = device
-                .create_sampler(gfx_hal::image::SamplerInfo::new(
-                    gfx_hal::image::Filter::Nearest,
-                    gfx_hal::image::WrapMode::Tile,
-                ))
-                .map_err(|_| "Couldn't create the sampler!")?;
-
-            // 6. create a CommandBuffer
-            let mut cmd_buffer = command_pool.acquire_command_buffer::<gfx_hal::command::OneShot>();
-            cmd_buffer.begin();
-
-            // 7. Use a pipeline barrier to transition the image from empty/undefined
-            //    to TRANSFER_WRITE/TransferDstOptimal
-            let image_barrier = gfx_hal::memory::Barrier::Image {
-                states: (gfx_hal::image::Access::empty(), Layout::Undefined)
-                    ..(
-                        gfx_hal::image::Access::TRANSFER_WRITE,
-                        Layout::TransferDstOptimal,
-                    ),
-                target: &the_image,
-                families: None,
-                range: SubresourceRange {
-                    aspects: Aspects::COLOR,
-                    levels: 0..1,
-                    layers: 0..1,
-                },
-            };
-            cmd_buffer.pipeline_barrier(
-                PipelineStage::TOP_OF_PIPE..PipelineStage::TRANSFER,
-                gfx_hal::memory::Dependencies::empty(),
-                &[image_barrier],
-            );
-
-            // 8. perform copy from staging buffer to image
-            cmd_buffer.copy_buffer_to_image(
-                &staging_bundle.buffer,
-                &the_image,
-                Layout::TransferDstOptimal,
-                &[gfx_hal::command::BufferImageCopy {
-                    buffer_offset: 0,
-                    buffer_width: (row_pitch / pixel_size) as u32,
-                    buffer_height: img.height(),
-                    image_layers: gfx_hal::image::SubresourceLayers {
-                        aspects: Aspects::COLOR,
-                        level: 0,
-                        layers: 0..1,
-                    },
-                    image_offset: gfx_hal::image::Offset { x: 0, y: 0, z: 0 },
-                    image_extent: gfx_hal::image::Extent {
-                        width: img.width(),
-                        height: img.height(),
-                        depth: 1,
-                    },
-                }],
-            );
-
-            // 9. use pipeline barrier to transition the image to SHADER_READ access/
-            //    ShaderReadOnlyOptimal layout
-            let image_barrier = gfx_hal::memory::Barrier::Image {
-                states: (
-                    gfx_hal::image::Access::TRANSFER_WRITE,
-                    Layout::TransferDstOptimal,
-                )
-                    ..(
-                        gfx_hal::image::Access::SHADER_READ,
-                        Layout::ShaderReadOnlyOptimal,
-                    ),
-                target: &the_image,
-                families: None,
-                range: SubresourceRange {
-                    aspects: Aspects::COLOR,
-                    levels: 0..1,
-                    layers: 0..1,
-                },
-            };
-            cmd_buffer.pipeline_barrier(
-                PipelineStage::TRANSFER..PipelineStage::FRAGMENT_SHADER,
-                gfx_hal::memory::Dependencies::empty(),
-                &[image_barrier],
-            );
-
-            // 10. Submit the cmd buffer to queue and wait for it
-            cmd_buffer.finish();
-            let upload_fence = device
-                .create_fence(false)
-                .map_err(|_| "Couldn't create an upload fence!")?;
-            command_queue.submit_nosemaphores(Some(&cmd_buffer), Some(&upload_fence));
-            device
-                .wait_for_fence(&upload_fence, core::u64::MAX)
-                .map_err(|_| "Couldn't wait for the fence!")?;
-            device.destroy_fence(upload_fence);
-
-            // 11. Destroy the staging bundle and one shot buffer now that we're done
-            staging_bundle.manually_drop(device);
-            command_pool.free(Some(cmd_buffer));
-
-            Ok(LoadedImage {
-                image: ManuallyDrop::new(the_image),
-                requirements,
-                memory: ManuallyDrop::new(memory),
-                image_view: ManuallyDrop::new(image_view),
-                sampler: ManuallyDrop::new(sampler),
-                phantom: PhantomData,
-            })
-        }
-    }
-
-    pub unsafe fn manually_drop(&self, device: &D) {
-        use core::ptr::read;
-        device.destroy_sampler(ManuallyDrop::into_inner(read(&self.sampler)));
-        device.destroy_image_view(ManuallyDrop::into_inner(read(&self.image_view)));
-        device.destroy_image(ManuallyDrop::into_inner(read(&self.image)));
-        device.free_memory(ManuallyDrop::into_inner(read(&self.memory)));
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub struct Vertex {
-    xy: [f32; 2],
-    rgb: [f32; 3],
-    uv: [f32; 2],
-    uv_rect: [f32; 4],
-}
-impl Vertex {
-    pub fn attributes() -> Vec<AttributeDesc> {
-        const POSITION_ATTR_SIZE: usize = mem::size_of::<f32>() * 2;
-        const COLOR_ATTR_SIZE: usize = mem::size_of::<f32>() * 3;
-        const UV_ATTR_SIZE: usize = mem::size_of::<f32>() * 2;
-
-        let position_attribute = AttributeDesc {
-            location: 0,
-            binding: 0,
-            element: Element {
-                format: Format::Rg32Float,
-                offset: 0,
-            },
-        };
-        let color_attribute = AttributeDesc {
-            location: 1,
-            binding: 0,
-            element: Element {
-                format: Format::Rgb32Float,
-                offset: POSITION_ATTR_SIZE as ElemOffset,
-            },
-        };
-        let uv_attribute = AttributeDesc {
-            location: 2,
-            binding: 0,
-            element: Element {
-                format: Format::Rg32Float,
-                offset: (POSITION_ATTR_SIZE + COLOR_ATTR_SIZE) as ElemOffset,
-            },
-        };
-        let uv_rect_attribute = AttributeDesc {
-            location: 3,
-            binding: 0,
-            element: Element {
-                format: Format::Rgba32Float,
-                offset: (POSITION_ATTR_SIZE + COLOR_ATTR_SIZE + UV_ATTR_SIZE) as ElemOffset,
-            }
-        };
-        vec![position_attribute, color_attribute, uv_attribute, uv_rect_attribute]
-    }
-    pub fn to_array(self) -> [f32; 2 + 3 + 2] {
-        let [x, y] = self.xy;
-        let [r, g, b] = self.rgb;
-        let [u, v] = self.uv;
-        //let [ur_x, ur_y, ur_z, ur_w] = self.uv_rect;
-        [x, y, r, g, b, u, v] //ur_x, ur_y, ur_z, ur_w ]
-    }
-}
-
 pub struct HalState {
     creation_instant: Instant,
+    num_quads: usize,
     vertices: BufferBundle<back::Backend, back::Device>,
     indexes: BufferBundle<back::Backend, back::Device>,
     texture: LoadedImage<back::Backend, back::Device>,
@@ -450,7 +136,7 @@ pub struct HalState {
 }
 
 impl HalState {
-    pub fn new(window: &crate::WindowState, texture: &[u8]) -> Result<Self, &'static str> {
+    pub fn new(window: &crate::WindowState, texture: &[u8], num_quads: Option<usize>) -> Result<Self, &'static str> {
         let logger = window.logger.new(o!("window" => "halstate"));
         let instance = back::Instance::create(&window.window_name, 1);
         let mut surface = instance.create_surface(&window.window);
@@ -742,18 +428,18 @@ impl HalState {
         let vertices = BufferBundle::new(
             &adapter,
             &device,
-            F32_XY_RGB_UV_UVRECT_QUAD * MAX_QUADS,
+            F32_XY_RGB_UV_UVRECT_QUAD * num_quads.unwrap_or(MAX_QUADS),
             BufferUsage::VERTEX,
         )?;
         const U16_QUAD_INDICES: usize = mem::size_of::<u16>() * 2 * 3;
-        let indexes = BufferBundle::new(&adapter, &device, U16_QUAD_INDICES * MAX_QUADS, BufferUsage::INDEX)?;
+        let indexes = BufferBundle::new(&adapter, &device, U16_QUAD_INDICES * num_quads.unwrap_or(MAX_QUADS), BufferUsage::INDEX)?;
 
         unsafe {
             let mut data_target = device
                 .acquire_mapping_writer(&indexes.memory, 0..indexes.requirements.size)
                 .map_err(|_| "Failed to require an index buffer mapping writer!")?;
             const INDEX_DATA: &[u16] = &[0, 1, 2, 2, 3, 0];
-            for i in 0..MAX_QUADS {
+            for i in 0..num_quads.unwrap_or(MAX_QUADS) {
                 let stride: usize = 6;
                 let vertex_stride = 4;
                 let index_data: &[u16] = &[
@@ -772,6 +458,7 @@ impl HalState {
         }
 
         Ok(HalState {
+            num_quads: num_quads.unwrap_or(MAX_QUADS),
             vertices,
             indexes,
             texture,
@@ -800,6 +487,66 @@ impl HalState {
             _surface: surface,
             _instance: ManuallyDrop::new(instance),
         })
+    }
+
+    pub fn extend_quad_alloc(&mut self, new_max: usize) -> Result<(), &'static str> {
+        const F32_XY_RGB_UV_UVRECT_QUAD: usize = mem::size_of::<Vertex>() * 4;
+        if new_max as u64 > self.vertices.requirements.size / F32_XY_RGB_UV_UVRECT_QUAD as u64 {
+            unsafe {
+                let new_vertices = BufferBundle::new(
+                    &self._adapter,
+                    &*self.device,
+                    F32_XY_RGB_UV_UVRECT_QUAD * new_max,
+                    BufferUsage::VERTEX,
+                )?;
+                const U16_QUAD_INDICES: usize = mem::size_of::<u16>() * 2 * 3;
+                let new_indexes = {
+                    let res = BufferBundle::new(&self._adapter, self.device.deref(), U16_QUAD_INDICES * new_max, BufferUsage::INDEX);
+                    if res.is_err() {
+                        new_vertices.manually_drop(&self.device);
+                    }
+                    res?
+                };
+                let mut data_target = {
+                    let res = self
+                        .device
+                        .acquire_mapping_writer(&new_indexes.memory, 0..new_indexes.requirements.size)
+                        .map_err(|_| "Failed to require an index buffer mapping writer!");
+                    if res.is_err() {
+                        new_vertices.manually_drop(&self.device);
+                        new_indexes.manually_drop(&self.device);
+                    }
+                    res?
+                };
+                const INDEX_DATA: &[u16] = &[0, 1, 2, 2, 3, 0];
+                for i in 0..new_max {
+                    let stride: usize = 6;
+                    let vertex_stride = 4;
+                    let index_data: &[u16] = &[
+                        i as u16 * vertex_stride + INDEX_DATA[0],
+                        i as u16 * vertex_stride + INDEX_DATA[1],
+                        i as u16 * vertex_stride + INDEX_DATA[2],
+                        i as u16 * vertex_stride + INDEX_DATA[3],
+                        i as u16 * vertex_stride + INDEX_DATA[4],
+                        i as u16 * vertex_stride + INDEX_DATA[5],
+                    ];
+                    data_target[stride * i..stride * (i+1)].copy_from_slice(&index_data);
+                }
+                if let Err(_) = self.device
+                    .release_mapping_writer(data_target)
+                {
+                    new_vertices.manually_drop(&self.device);
+                    new_indexes.manually_drop(&self.device);
+                    return Err("Couldn't release the index buffer mapping writer!");
+                }
+                let old_vertex_buffer = mem::replace(&mut self.vertices, new_vertices);
+                let old_index_buffer = mem::replace(&mut self.indexes, new_indexes);
+                old_vertex_buffer.manually_drop(&self.device);
+                old_index_buffer.manually_drop(&self.device);
+                self.num_quads = new_max
+            }
+        }
+        Ok(())
     }
 
     pub fn draw_clear_frame(&mut self, color: [f32; 4]) -> Result<(), &'static str> {
@@ -864,12 +611,17 @@ impl HalState {
     }
 
     pub fn draw_quad_frame(&mut self, textured_quads: &[TexturedQuad]) -> Result<(), &'static str> {
+        // advance the frame before early returns can happen
+        self.current_frame = (self.current_frame + 1) % self.frames_in_flight;
+
+        if self.num_quads <= textured_quads.len() {
+            self.extend_quad_alloc(textured_quads.len())?;
+        }
+
         // FRAME SETUP
         let image_available = &self.image_available_semaphores[self.current_frame];
         let render_finished = &self.render_finished_semaphores[self.current_frame];
 
-        // advance the frame before early returns can happen
-        self.current_frame = (self.current_frame + 1) % self.frames_in_flight;
 
         let (i_u32, i_usize) = unsafe {
             let image_index = self
@@ -889,6 +641,7 @@ impl HalState {
                 .map_err(|_| "Couldn't reset fence!")?;
         }
 
+
         unsafe {
             let mut data_target = self
                 .device
@@ -898,7 +651,7 @@ impl HalState {
                 )
                 .map_err(|_| "Failed to acquire a memory writer!")?;
             for i in 0..textured_quads.len().min(MAX_QUADS) {
-                let stride = mem::size_of::<Vertex>()/mem::size_of::<f32>() * 4;
+                let stride = (2 + 3 + 2 + 4) * 4;
                 data_target[stride * i..stride * (i + 1)]
                     .copy_from_slice(&textured_quads[i].to_f32s());
             }
