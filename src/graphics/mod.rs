@@ -543,7 +543,7 @@ impl HalState {
                 let old_index_buffer = mem::replace(&mut self.indexes, new_indexes);
                 old_vertex_buffer.manually_drop(&self.device);
                 old_index_buffer.manually_drop(&self.device);
-                self.num_quads = new_max
+                self.num_quads = new_max;
             }
         }
         Ok(())
