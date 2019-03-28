@@ -1,9 +1,43 @@
 #[derive(Debug, Clone, Copy)]
-pub struct Quad {
+pub struct Rectangle {
     pub x: f32,
     pub y: f32,
     pub w: f32,
     pub h: f32,
+}
+
+impl Rectangle {
+    fn to_quad(self) -> Quad {
+        let Rectangle { x, y, w, h } = self;
+        Quad {
+            top_left: Point2D {
+                x: x,
+                    y: y+h,
+                },
+            bottom_left: Point2D {
+                x: x,
+                y: y,
+            },
+            bottom_right: Point2D {
+                x: x+w,
+                y: y,
+            },
+            top_right: Point2D {
+                x: x+w,
+                y: y+h,
+            },
+        }
+    }
+}
+
+/// Quad of points stored as: Top left, bottom left, bottom right, top right
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct Quad {
+    top_left: Point2D,
+    bottom_left  : Point2D,
+    bottom_right : Point2D,
+    top_right    : Point2D,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -13,14 +47,14 @@ pub struct Triangle {
 
 impl Quad {
     pub fn vertex_attributes(self) -> [f32; 4 * (2 + 3 + 2)] {
-        let Quad { x, y, w, h } = self;
+        let Quad { top_left, bottom_left, bottom_right, top_right } = self;
         #[cfg_attr(rustfmt, rustfmt_skip)]
         [/*
-         X    Y    R    G    B                  U    V                    */
-         x  , y+h, 1.0, 0.0, 0.0, /* red     */ 0.0, 1.0, /* bottom left  */
-         x  , y  , 0.0, 1.0, 0.0, /* green   */ 0.0, 0.0, /* top left     */
-         x+w, y  , 0.0, 0.0, 1.0, /* blue    */ 1.0, 0.0, /* bottom right */
-         x+w, y+h, 1.0, 0.0, 1.0, /* magenta */ 1.0, 1.0, /* top right    */
+         X               Y               R    G    B                  U    V                    */
+         top_left.x,     top_left.y,     1.0, 0.0, 0.0, /* red     */ 0.0, 1.0, /* bottom left  */
+         bottom_left.x,  bottom_left.y,  0.0, 1.0, 0.0, /* green   */ 0.0, 0.0, /* top left     */
+         bottom_right.x, bottom_right.y, 0.0, 0.0, 1.0, /* blue    */ 1.0, 0.0, /* bottom right */
+         top_right.x,    top_right.y,    1.0, 0.0, 1.0, /* magenta */ 1.0, 1.0, /* top right    */
         ]
     }
 }

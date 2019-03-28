@@ -11,54 +11,93 @@ pub use graphics::HalState;
 use gfx_hal::Device;
 use slog::Drain;
 use winit::{EventsLoop, WindowBuilder, Window, dpi::LogicalSize, Event, DeviceEvent, KeyboardInput};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Sender, Receiver};
+use std::sync::Arc;
+use std::thread;
 use std::time::Instant;
-use std::marker::PhantomData;
+
+pub trait EventHandler {
+    fn handle_event(&mut self, RMEvent, &mut Renderer);
+}
+
+pub struct GraphicsHandle {}
 
 #[derive(Debug)]
-pub struct WindowState {
-    window_name: String,
-    events_loop: EventsLoop,
+pub struct RMGfxContext<E: EventHandler> {
+    graphics_state: RMGraphics,
     window: Window,
-    logger: slog::Logger,
+    handler: E,
+    event_receiver: Receiver<Event>,
+    control_handle: Sender<Signal>,
 }
 
-impl WindowState {
-    pub fn new(title: &str, size: (f64, f64), logger: Option<slog::Logger>) -> Result<WindowState, winit::CreationError> {
-        let events_loop = EventsLoop::new();
-        let window = WindowBuilder::new()
-            .with_title(title)
-            .with_dimensions(LogicalSize {
-                width: size.0,
-                height: size.1,
-            })
-            .build(&events_loop)?;
-        Ok(WindowState {
-            window_name: title.into(),
-            events_loop,
-            window,
-            logger: logger.unwrap_or(slog::Logger::root(slog_stdlog::StdLog.fuse(), o!()))
-        })
-    }
-
-    pub fn poll_event<F>(&mut self, mut f: F) where F: FnMut(Instant, Event) {
-        self.events_loop.poll_events(move |event| {
-            let now = Instant::now();
-            f(now, event)
-        })
-    }
-
-    pub fn get_window(&self) -> &Window {
-        &self.window
-    }
-
-    pub fn get_events_loop_mut(&mut self) -> &mut EventsLoop {
-        &mut self.events_loop
-    }
+enum Signal {
+    Start,
+    Quit
 }
 
-pub enum Vsync {
-    TripleBuffered,
-    DoubleBuffered,
-    None,
+impl<E> RMGfxContext<E> {
+    pub fn new(event_handler: E, window_title: &str, dimensions: (f64, f64)) -> Self {
+        let (win_tx, win_rx) = mpsc::channel();
+        let (graphics_handle_tx, graphics_handle_rx) = mpsc::channel();
+        let (start_tx, start_rx) = mpsc::sync_channel(1);
+        let (event_tx, event_rx) = mpsc::channel(); 
+        let window_title = window_title.to_string();
+        
+        let event_thread_handle = thread::spawn(move || {
+            // take ownership of window_title and handle_tx
+            let handler_tx = handle_tx;
+            let window_title = window_title;
+
+            // inner scope because we don't need win_tx after this and just wanna drop it
+            let mut event_loop = {
+                let win_tx = win_tx; // explicitly take ownership again
+                
+                let event_loop = EventLoop::new();
+                let window = WindowBuilder::new()
+                    .with_title(window_title)
+                    .with_dimensions(LogicalSize {
+                        height: dimensions.0,
+                        width: dimensions.1,
+                    })
+                    .build(&event_loop);
+                win_tx.send(window);
+                event_loop
+            };
+
+            match start_rx.recv() {
+                Ok(Signal::Start) =>
+                    event_loop.run_forever(|event| {
+                        let timestamp = Instant::now();
+                        handle_tx.send((timestamp, event))
+                    }),
+                _ => return,
+            }
+        });
+        
+        let window = match win_rx.recv() {
+            Ok(window) => window,
+            e @ Err(_) => {
+                start_handle.send(Signal::Stop);
+                event_thread_handle.join();
+                return e
+            }
+        }
+        
+    }
+
+    /// Creates a renderer which isn't dependent on the window
+    pub fn make_renderer(&self) -> Renderer {
+        unimplemented!()
+    }
+
+    pub fn run_forever(&mut self) -> Result<()> {
+        start_handle.send(Signal::Start);
+        loop {
+            match self.event_receiver.recv() {
+                Ok(e) => self.event_handler.handle_event(RMEvent::from(e)),
+                Err(e) => Err(e),
+            }
+        }
+    }
 }

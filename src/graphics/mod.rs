@@ -7,13 +7,10 @@ use gfx_backend_metal as back;
 #[cfg(feature = "vulkan")]
 use gfx_backend_vulkan as back;
 
-mod vertex;
 mod gpu_buffer;
 mod loadedimage;
+mod vertex;
 
-use loadedimage::LoadedImage;
-use gpu_buffer::BufferBundle;
-use vertex::Vertex;
 use crate::geometry::Quad;
 use arrayvec::ArrayVec;
 use core::{
@@ -46,7 +43,10 @@ use gfx_hal::{
     window::{Backbuffer, Extent2D, FrameSync, PresentMode, Swapchain, SwapchainConfig},
     Backend, DescriptorPool, Gpu, Graphics, IndexType, Instance, Primitive, QueueFamily, Surface,
 };
+use gpu_buffer::BufferBundle;
+use loadedimage::LoadedImage;
 use std::time::Instant;
+use vertex::Vertex;
 
 const MAX_QUADS: usize = 4096;
 const VERTEX_SOURCE: &str = include_str!("vertex.glsl");
@@ -65,11 +65,11 @@ impl TexturedQuad {
         let Quad { x, y, w, h } = self.quad;
         #[cfg_attr(rustfmt, rustfmt_skip)]
         [/*
-         X    Y    R    G    B                  U    V                    */ /* uv_rect       */
-         x  , y+h, 1.0, 0.0, 0.0, /* red     */ 0.0, 1.0, /* bottom left  */ uvx, uvy, uvz, uvw,
-         x  , y  , 0.0, 1.0, 0.0, /* green   */ 0.0, 0.0, /* top left     */ uvx, uvy, uvz, uvw,
-         x+w, y  , 0.0, 0.0, 1.0, /* blue    */ 1.0, 0.0, /* bottom right */ uvx, uvy, uvz, uvw,
-         x+w, y+h, 1.0, 0.0, 1.0, /* magenta */ 1.0, 1.0, /* top right    */ uvx, uvy, uvz, uvw,
+         X               Y               R    G    B                  U    V                    */ /* uv_rect       */
+         top_left.x,     top_left.y,     1.0, 0.0, 0.0, /* red     */ 0.0, 1.0, /* bottom left  */ uvx, uvy, uvz, uvw,
+         bottom_left.x,  bottom_left.y,  0.0, 1.0, 0.0, /* green   */ 0.0, 0.0, /* top left     */ uvx, uvy, uvz, uvw,
+         bottom_right.x, bottom_right.y, 0.0, 0.0, 1.0, /* blue    */ 1.0, 0.0, /* bottom right */ uvx, uvy, uvz, uvw,
+         top_right.x,    top_right.y,    1.0, 0.0, 1.0, /* magenta */ 1.0, 1.0, /* top right    */ uvx, uvy, uvz, uvw,
         ]
     }
     pub fn to_vertices(self) -> [Vertex; 4] {
@@ -101,6 +101,68 @@ impl TexturedQuad {
                 uv_rect,
             },
         ]
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct HalStateBuilder<'a, 'b> {
+    window: &'b crate::WindowState,
+    image: &'a [u8],
+    num_quads: Option<usize>,
+    preferred_vsync: Option<[PresentMode; 4]>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Vsync {
+    TripleBuffered,
+    DoubleBuffered,
+    Relaxed,
+    Immediate,
+}
+
+impl Into<PresentMode> for Vsync {
+    fn into(self) -> PresentMode {
+        match self {
+            Vsync::TripleBuffered => PresentMode::Mailbox,
+            Vsync::DoubleBuffered => PresentMode::Fifo,
+            Vsync::Relaxed => PresentMode::Relaxed,
+            Vsync::Immediate => PresentMode::Immediate,
+        }
+    }
+}
+
+impl<'a, 'b> HalStateBuilder<'a, 'b> {
+    pub fn new(window: &'b crate::WindowState, image: &'a [u8]) -> Self {
+        Self {
+            window,
+            image,
+            num_quads: None,
+            preferred_vsync: None,
+        }
+    }
+
+    pub fn preferred_vsync(mut self, vsync: [Vsync; 4]) -> Self {
+        self.preferred_vsync = Some([
+            vsync[0].into(),
+            vsync[1].into(),
+            vsync[2].into(),
+            vsync[3].into(),
+        ]);
+        self
+    }
+
+    pub fn num_quads(mut self, num_quads: usize) -> Self {
+        self.num_quads = Some(num_quads);
+        self
+    }
+
+    pub fn finish(self) -> Result<HalState, &'static str> {
+        use gfx_hal::window::PresentMode::*;
+        let num_quads = self.num_quads.unwrap_or(MAX_QUADS);
+        let vsync = self
+            .preferred_vsync
+            .unwrap_or([Mailbox, Fifo, Relaxed, Immediate]);
+        HalState::new(self.window, self.image, num_quads, vsync)
     }
 }
 
@@ -136,7 +198,12 @@ pub struct HalState {
 }
 
 impl HalState {
-    pub fn new(window: &crate::WindowState, texture: &[u8], num_quads: Option<usize>) -> Result<Self, &'static str> {
+    pub fn new(
+        window: &crate::WindowState,
+        texture: &[u8],
+        num_quads: usize,
+        preferred_vsync: [PresentMode; 4],
+    ) -> Result<Self, &'static str> {
         let logger = window.logger.new(o!("window" => "halstate"));
         let instance = back::Instance::create(&window.window_name, 1);
         let mut surface = instance.create_surface(&window.window);
@@ -181,8 +248,7 @@ impl HalState {
             info!(logger, "composite alphas"; "composite_alphas" => format!("{:?}", composite_alphas));
             //
             let present_mode = {
-                use gfx_hal::window::PresentMode::*;
-                [Mailbox, Fifo, Relaxed, Immediate]
+                preferred_vsync
                     .iter()
                     .cloned()
                     .find(|pm| present_modes.contains(pm))
@@ -428,18 +494,23 @@ impl HalState {
         let vertices = BufferBundle::new(
             &adapter,
             &device,
-            F32_XY_RGB_UV_UVRECT_QUAD * num_quads.unwrap_or(MAX_QUADS),
+            F32_XY_RGB_UV_UVRECT_QUAD * num_quads,
             BufferUsage::VERTEX,
         )?;
         const U16_QUAD_INDICES: usize = mem::size_of::<u16>() * 2 * 3;
-        let indexes = BufferBundle::new(&adapter, &device, U16_QUAD_INDICES * num_quads.unwrap_or(MAX_QUADS), BufferUsage::INDEX)?;
+        let indexes = BufferBundle::new(
+            &adapter,
+            &device,
+            U16_QUAD_INDICES * num_quads,
+            BufferUsage::INDEX,
+        )?;
 
         unsafe {
             let mut data_target = device
                 .acquire_mapping_writer(&indexes.memory, 0..indexes.requirements.size)
                 .map_err(|_| "Failed to require an index buffer mapping writer!")?;
             const INDEX_DATA: &[u16] = &[0, 1, 2, 2, 3, 0];
-            for i in 0..num_quads.unwrap_or(MAX_QUADS) {
+            for i in 0..num_quads {
                 let stride: usize = 6;
                 let vertex_stride = 4;
                 let index_data: &[u16] = &[
@@ -450,7 +521,7 @@ impl HalState {
                     i as u16 * vertex_stride + INDEX_DATA[4],
                     i as u16 * vertex_stride + INDEX_DATA[5],
                 ];
-                data_target[stride * i..stride * (i+1)].copy_from_slice(&index_data);
+                data_target[stride * i..stride * (i + 1)].copy_from_slice(&index_data);
             }
             device
                 .release_mapping_writer(data_target)
@@ -458,7 +529,7 @@ impl HalState {
         }
 
         Ok(HalState {
-            num_quads: num_quads.unwrap_or(MAX_QUADS),
+            num_quads,
             vertices,
             indexes,
             texture,
@@ -501,7 +572,12 @@ impl HalState {
                 )?;
                 const U16_QUAD_INDICES: usize = mem::size_of::<u16>() * 2 * 3;
                 let new_indexes = {
-                    let res = BufferBundle::new(&self._adapter, self.device.deref(), U16_QUAD_INDICES * new_max, BufferUsage::INDEX);
+                    let res = BufferBundle::new(
+                        &self._adapter,
+                        self.device.deref(),
+                        U16_QUAD_INDICES * new_max,
+                        BufferUsage::INDEX,
+                    );
                     if res.is_err() {
                         new_vertices.manually_drop(&self.device);
                     }
@@ -510,7 +586,10 @@ impl HalState {
                 let mut data_target = {
                     let res = self
                         .device
-                        .acquire_mapping_writer(&new_indexes.memory, 0..new_indexes.requirements.size)
+                        .acquire_mapping_writer(
+                            &new_indexes.memory,
+                            0..new_indexes.requirements.size,
+                        )
                         .map_err(|_| "Failed to require an index buffer mapping writer!");
                     if res.is_err() {
                         new_vertices.manually_drop(&self.device);
@@ -530,11 +609,9 @@ impl HalState {
                         i as u16 * vertex_stride + INDEX_DATA[4],
                         i as u16 * vertex_stride + INDEX_DATA[5],
                     ];
-                    data_target[stride * i..stride * (i+1)].copy_from_slice(&index_data);
+                    data_target[stride * i..stride * (i + 1)].copy_from_slice(&index_data);
                 }
-                if let Err(_) = self.device
-                    .release_mapping_writer(data_target)
-                {
+                if let Err(_) = self.device.release_mapping_writer(data_target) {
                     new_vertices.manually_drop(&self.device);
                     new_indexes.manually_drop(&self.device);
                     return Err("Couldn't release the index buffer mapping writer!");
@@ -622,7 +699,6 @@ impl HalState {
         let image_available = &self.image_available_semaphores[self.current_frame];
         let render_finished = &self.render_finished_semaphores[self.current_frame];
 
-
         let (i_u32, i_usize) = unsafe {
             let image_index = self
                 .swapchain
@@ -640,7 +716,6 @@ impl HalState {
                 .reset_fence(flight_fence)
                 .map_err(|_| "Couldn't reset fence!")?;
         }
-
 
         unsafe {
             let mut data_target = self
@@ -734,13 +809,13 @@ impl HalState {
         render_pass: &<back::Backend as Backend>::RenderPass,
         logger: &slog::Logger,
     ) -> Result<
-        (
-            Vec<<back::Backend as Backend>::DescriptorSetLayout>,
-            <back::Backend as Backend>::PipelineLayout,
-            <back::Backend as Backend>::GraphicsPipeline,
-        ),
+            (
+                Vec<<back::Backend as Backend>::DescriptorSetLayout>,
+                <back::Backend as Backend>::PipelineLayout,
+                <back::Backend as Backend>::GraphicsPipeline,
+            ),
         &'static str,
-    > {
+        > {
         let mut compiler = shaderc::Compiler::new().ok_or("shaderc not found!")?;
         let vertex_compile_artifact = compiler
             .compile_into_spirv(
@@ -826,17 +901,17 @@ impl HalState {
             /* let blend_state = BlendState::On {
             color: BlendOp::Add {
             src: Factor::One,
-                    dst: Factor::Zero,
-                },
-                alpha: BlendOp::Add {
-                src: Factor::One,
-                dst: Factor::Zero,
-                },
+            dst: Factor::Zero,
+        },
+            alpha: BlendOp::Add {
+            src: Factor::One,
+            dst: Factor::Zero,
+        },
         };*/
-                BlendDesc {
-                    logic_op: Some(LogicOp::Copy),
-                    targets: vec![ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA)],
-                }
+            BlendDesc {
+                logic_op: Some(LogicOp::Copy),
+                targets: vec![ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA)],
+            }
         };
         let baked_states = BakedStates {
             viewport: Some(Viewport {
@@ -877,9 +952,7 @@ impl HalState {
                     .map_err(|_| "Couldn't make a DescriptorSetLayout")?
             }];
 
-        let push_constants = vec![
-            (ShaderStageFlags::VERTEX, 0..5),
-        ];
+        let push_constants = vec![(ShaderStageFlags::VERTEX, 0..5)];
         let layout = unsafe {
             device
                 .create_pipeline_layout(&descriptor_set_layouts, push_constants)
