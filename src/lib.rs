@@ -16,8 +16,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
+struct Renderer {}
+
 pub trait EventHandler {
-    fn handle_event(&mut self, RMEvent, &mut Renderer);
+    fn handle_event(&mut self, RMEvent);
 }
 
 pub struct GraphicsHandle {}
