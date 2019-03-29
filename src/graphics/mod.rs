@@ -7,6 +7,10 @@ use gfx_backend_metal as back;
 #[cfg(feature = "vulkan")]
 use gfx_backend_vulkan as back;
 
+macro_rules! debug_repr {
+    ($e:expr) => {format_args!("{:?}", $e)};
+}
+
 mod gpu_buffer;
 mod loadedimage;
 mod vertex;
@@ -45,6 +49,7 @@ use gfx_hal::{
 };
 use gpu_buffer::BufferBundle;
 use loadedimage::LoadedImage;
+use slog::{Drain, Logger};
 use std::time::Instant;
 use vertex::Vertex;
 
@@ -62,7 +67,12 @@ pub struct TexturedQuad {
 impl TexturedQuad {
     pub(crate) fn to_f32s(self) -> [f32; 4 * (2 + 3 + 2 + 4)] {
         let [uvx, uvy, uvz, uvw] = self.uv_rect;
-        let Quad { x, y, w, h } = self.quad;
+        let Quad {
+            top_left,
+            bottom_left,
+            bottom_right,
+            top_right,
+        } = self.quad;
         #[cfg_attr(rustfmt, rustfmt_skip)]
         [/*
          X               Y               R    G    B                  U    V                    */ /* uv_rect       */
@@ -73,96 +83,124 @@ impl TexturedQuad {
         ]
     }
     pub fn to_vertices(self) -> [Vertex; 4] {
+        use crate::geometry::Point2D as P;
         let uv_rect = self.uv_rect;
-        let Quad { x, y, w, h } = self.quad;
+        let Quad {
+            top_left,
+            bottom_left,
+            bottom_right,
+            top_right,
+        } = self.quad;
         [
             Vertex {
-                xy: [x, y + h],
+                xy: [top_left.x, top_left.y],
                 rgb: [1.0, 0.0, 0.0],
                 uv: [0.0, 1.0],
                 uv_rect,
             },
             Vertex {
-                xy: [x, y],
+                xy: [bottom_left.x, bottom_left.y],
                 rgb: [0.0, 1.0, 0.0],
-                uv: [0.0, 0.0],
-                uv_rect,
-            },
-            Vertex {
-                xy: [x + w, y],
-                rgb: [0.0, 0.0, 1.0],
-                uv: [1.0, 0.0],
-                uv_rect,
-            },
-            Vertex {
-                xy: [x + w, y + h],
-                rgb: [1.0, 0.0, 1.0],
-                uv: [1.0, 1.0],
-                uv_rect,
-            },
-        ]
-    }
-}
+                           uv: [0.0, 0.0],
+                           uv_rect,
+                       },
+                       Vertex {
+                           xy: [bottom_right.x, bottom_right.y],
+                           rgb: [0.0, 0.0, 1.0],
+                           uv: [1.0, 0.0],
+                           uv_rect,
+                       },
+                       Vertex {
+                           xy: [top_right.x, top_right.y],
+                           rgb: [1.0, 0.0, 1.0],
+                           uv: [1.0, 1.0],
+                           uv_rect,
+                       },
+                   ]
+               }
+           }
 
-#[derive(Copy, Clone, Debug)]
-pub struct HalStateBuilder<'a, 'b> {
-    window: &'b crate::WindowState,
-    image: &'a [u8],
-    num_quads: Option<usize>,
-    preferred_vsync: Option<[PresentMode; 4]>,
-}
+           #[derive(Copy, Clone, Debug)]
+           pub enum Vsync {
+               TripleBuffered,
+               DoubleBuffered,
+               Relaxed,
+               Immediate,
+           }
 
-#[derive(Copy, Clone, Debug)]
-pub enum Vsync {
-    TripleBuffered,
-    DoubleBuffered,
-    Relaxed,
-    Immediate,
-}
+           impl Into<PresentMode> for Vsync {
+               fn into(self) -> PresentMode {
+                   match self {
+                       Vsync::TripleBuffered => PresentMode::Mailbox,
+                       Vsync::DoubleBuffered => PresentMode::Fifo,
+                       Vsync::Relaxed => PresentMode::Relaxed,
+                       Vsync::Immediate => PresentMode::Immediate,
+                   }
+               }
+           }
 
-impl Into<PresentMode> for Vsync {
-    fn into(self) -> PresentMode {
-        match self {
-            Vsync::TripleBuffered => PresentMode::Mailbox,
-            Vsync::DoubleBuffered => PresentMode::Fifo,
-            Vsync::Relaxed => PresentMode::Relaxed,
-            Vsync::Immediate => PresentMode::Immediate,
-        }
-    }
-}
+           #[derive(Clone, Debug)]
+           pub struct HalStateBuilder<'a, 'b, 'c> {
+               window: &'b winit::Window,
+               name: Option<&'c str>,
+               image: &'a [u8],
+               num_quads: Option<usize>,
+               preferred_vsync: Option<[PresentMode; 4]>,
+               logger: Option<slog::Logger>
+           }
 
-impl<'a, 'b> HalStateBuilder<'a, 'b> {
-    pub fn new(window: &'b crate::WindowState, image: &'a [u8]) -> Self {
-        Self {
-            window,
-            image,
-            num_quads: None,
-            preferred_vsync: None,
-        }
-    }
+           impl<'a, 'b, 'c> HalStateBuilder<'a, 'b, 'c> {
+               pub fn new(window: &'b winit::Window, image: &'a [u8]) -> Self {
+                   Self {
+                       window,
+                       image,
+                       name: None,
+                       num_quads: None,
+                       preferred_vsync: None,
+                       logger: None,
+                   }
+               }
 
-    pub fn preferred_vsync(mut self, vsync: [Vsync; 4]) -> Self {
-        self.preferred_vsync = Some([
-            vsync[0].into(),
-            vsync[1].into(),
-            vsync[2].into(),
-            vsync[3].into(),
-        ]);
-        self
-    }
+               pub fn preferred_vsync(mut self, vsync: [Vsync; 4]) -> Self {
+                   self.preferred_vsync = Some([
+                       vsync[0].into(),
+                       vsync[1].into(),
+                       vsync[2].into(),
+                       vsync[3].into(),
+                   ]);
+                   self
+               }
 
-    pub fn num_quads(mut self, num_quads: usize) -> Self {
-        self.num_quads = Some(num_quads);
-        self
-    }
+               pub fn num_quads(mut self, num_quads: usize) -> Self {
+                   self.num_quads = Some(num_quads);
+                   self
+               }
 
-    pub fn finish(self) -> Result<HalState, &'static str> {
-        use gfx_hal::window::PresentMode::*;
-        let num_quads = self.num_quads.unwrap_or(MAX_QUADS);
+               pub fn name(mut self, name: &'c str) -> Self {
+                   self.name = Some(name);
+                   self
+               }
+
+               pub fn build(self) -> Result<HalState, &'static str> {
+                   use gfx_hal::window::PresentMode::*;
+                   let num_quads = self.num_quads.unwrap_or(MAX_QUADS);
+                   let vsync = self
+                       .preferred_vsync
+                       .unwrap_or([Mailbox, Fifo, Relaxed, Immediate]);
+                   let name = self.name.unwrap_or("");
+                   let logger = Logger::root(slog::Discard, o!());
+                   HalState::new(self.window, self.image, name, num_quads, vsync, logger)
+               }
+
+               
+               pub fn build_logged(self, logger: Logger) -> Result<HalState, &'static str> {
+                   use gfx_hal::window::PresentMode::*;
+                   let num_quads = self.num_quads.unwrap_or(MAX_QUADS);
         let vsync = self
             .preferred_vsync
             .unwrap_or([Mailbox, Fifo, Relaxed, Immediate]);
-        HalState::new(self.window, self.image, num_quads, vsync)
+        let name = self.name.unwrap_or("");
+        HalState::new(self.window, self.image, name, num_quads, vsync, logger)
     }
 }
 
@@ -174,7 +212,7 @@ pub struct HalState {
     texture: LoadedImage<back::Backend, back::Device>,
     descriptor_pool: ManuallyDrop<<back::Backend as Backend>::DescriptorPool>,
     descriptor_set: ManuallyDrop<<back::Backend as Backend>::DescriptorSet>,
-    logger: slog::Logger,
+    logger: Logger,
     descriptor_set_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout>,
     pipeline_layout: ManuallyDrop<<back::Backend as Backend>::PipelineLayout>,
     graphics_pipeline: ManuallyDrop<<back::Backend as Backend>::GraphicsPipeline>,
@@ -197,16 +235,23 @@ pub struct HalState {
     _instance: ManuallyDrop<back::Instance>,
 }
 
+impl std::fmt::Debug for HalState {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        writeln!(f, "HalState  {{ /* stuff */ }} ")
+    }
+}
+
 impl HalState {
     pub fn new(
-        window: &crate::WindowState,
+        window: &winit::Window,
         texture: &[u8],
+        name: &str,
         num_quads: usize,
         preferred_vsync: [PresentMode; 4],
+        logger: slog::Logger,
     ) -> Result<Self, &'static str> {
-        let logger = window.logger.new(o!("window" => "halstate"));
-        let instance = back::Instance::create(&window.window_name, 1);
-        let mut surface = instance.create_surface(&window.window);
+        let instance = back::Instance::create(name, 1);
+        let mut surface = instance.create_surface(window);
         let adapter = instance
             .enumerate_adapters()
             .into_iter()
@@ -242,10 +287,11 @@ impl HalState {
         let (swapchain, extent, backbuffer, format, frames_in_flight) = {
             let (caps, preferred_formats, present_modes, composite_alphas) =
                 surface.compatibility(&adapter.physical_device);
-            info!(logger, "caps"; "caps" => format!("{:?}", caps));
-            info!(logger, "preferred formats"; "preferred_formats" => format!("{:?}", preferred_formats));
-            info!(logger, "present modes"; "present_modes" => format!("{:?}", present_modes));
-            info!(logger, "composite alphas"; "composite_alphas" => format!("{:?}", composite_alphas));
+            info!(&logger, "surface compatibility";
+                  kv!("caps" => debug_repr!(caps),
+                      "preferred_formats" => debug_repr!(preferred_formats),
+                      "present_modes" => debug_repr!(present_modes),
+                      "composite_alphas" => debug_repr!(composite_alphas)));
             //
             let present_mode = {
                 preferred_vsync
@@ -279,10 +325,9 @@ impl HalState {
             // This really just grabs the extent as reported, but does some extra math since metal might report 4096x4096 because reasons
             let extent = {
                 let window_client_area = window
-                    .window
                     .get_inner_size()
                     .ok_or("Window doesn't exist!")?
-                    .to_physical(window.window.get_hidpi_factor());
+                    .to_physical(window.get_hidpi_factor());
                 Extent2D {
                     width: caps.extents.end.width.min(window_client_area.width as u32),
                     height: caps
@@ -312,7 +357,7 @@ impl HalState {
                 image_layers,
                 image_usage,
             };
-            info!(logger, "swapchain config"; "swapchain_config" => format!("{:#?}", swapchain_config));
+            info!(logger, "created a swapchain config"; "swapchain_config" => format!("{:#?}", swapchain_config));
             let (swapchain, backbuffer) = unsafe {
                 device
                     .create_swapchain(&mut surface, swapchain_config, None)
@@ -802,12 +847,12 @@ impl HalState {
                 .map_err(|_| "Failed to present into the swapchain!")
         }
     }
-
+    
     fn create_pipeline(
         device: &mut back::Device,
         extent: Extent2D,
         render_pass: &<back::Backend as Backend>::RenderPass,
-        logger: &slog::Logger,
+        logger: &Logger,
     ) -> Result<
             (
                 Vec<<back::Backend as Backend>::DescriptorSetLayout>,
@@ -825,7 +870,10 @@ impl HalState {
                 "halstate",
                 None,
             )
-            .map_err(|_| "Couldn't compile vertex shader!")?;
+            .map_err(|e| {
+                error!(logger, "failed to compile vertex shader"; "err" => %e);
+                "Couldn't compile vertex shader!"
+            })?;
         let fragment_compile_artifact = compiler
             .compile_into_spirv(
                 FRAGMENT_SOURCE,
@@ -835,7 +883,7 @@ impl HalState {
                 None,
             )
             .map_err(|e| {
-                error!(logger, "{}", e);
+                error!(logger, "failed to compile fragment shader"; "err" => %e);
                 "Couldn't compile fragment shader!"
             })?;
         let vertex_shader_module = unsafe {

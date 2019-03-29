@@ -34,10 +34,10 @@ impl Rectangle {
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct Quad {
-    top_left: Point2D,
-    bottom_left  : Point2D,
-    bottom_right : Point2D,
-    top_right    : Point2D,
+    pub top_left: Point2D,
+    pub bottom_left  : Point2D,
+    pub bottom_right : Point2D,
+    pub top_right    : Point2D,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -77,8 +77,8 @@ impl Triangle {
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Point2D {
-    x: f32,
-    y: f32,
+    pub x: f32,
+    pub y: f32,
 }
 
 impl Into<[f32; 2]> for Point2D {

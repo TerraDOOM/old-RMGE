@@ -11,6 +11,7 @@ shaderc = "0.3"
 slog = "2.4.1"
 slog-stdlog = "3.0.2"
 winit = "0.18"
+failure = "0.1"
 
 [dependencies.gfx-backend-vulkan]
 optional = true
