@@ -14,14 +14,13 @@ mod eventhandler;
 use crate::graphics::{HalState, HalStateBuilder};
 use crate::eventhandler::{EventHandler, RMEventHandler, Event};
 
-use crate::error::ContextError;
+use crate::error::{ContextError, CreationError};
 
 use failure::Error; 
-use slog::Drain;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Instant;
-use winit::{dpi::LogicalSize, DeviceEvent, EventsLoop, KeyboardInput, Window, WindowBuilder};
+use winit::{dpi::LogicalSize, EventsLoop, Window, WindowBuilder, ControlFlow};
 
 #[derive(Debug)]
 struct RMGraphics {
@@ -47,7 +46,7 @@ pub struct RMGfxContext<E: EventHandler> {
     logger: slog::Logger,
     graphics_state: RMGraphics,
     event_handler: RMEventHandler<E>,
-    event_rx: Receiver<Event>,
+    event_rx: Receiver<(Instant, winit::Event)>,
     control_handle: Sender<Signal>,
 }
 
@@ -63,11 +62,13 @@ impl<E: EventHandler> RMGfxContext<E> {
         let (start_tx, start_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         let window_title = window_title.to_string(); // must create a string to move it into the event thread
+        let event_logger = logger.new(o!());
 
         let event_thread_handle = thread::spawn(move || {
             // take ownership of window_title and handle_tx
             let event_tx = event_tx;
             let window_title = window_title;
+            let logger = event_logger;
 
             // inner scope because we don't need win_tx after this and just wanna drop it
             // Explanation for the event_loop stuff:
@@ -86,15 +87,23 @@ impl<E: EventHandler> RMGfxContext<E> {
                         width: dimensions.1,
                     })
                     .build(&event_loop);
-                win_tx.send(window);
+                if let Err(_) = win_tx.send(window) {
+                    return;
+                };
                 event_loop
             };
 
+            info!(logger, "window created, waiting for start signal");
+            
             match start_rx.recv() {
                 Ok(Signal::Start) => event_loop.run_forever(|event| {
                     let timestamp = Instant::now();
-                    event_tx.send(Event::from((timestamp, event)).into());
-                    unimplemented!()
+                    if let Err(e) = event_tx.send((timestamp, event)) {
+                        info!(logger, "error while sending data, stopping event loop and exiting thread"; "err" => %e);
+                        ControlFlow::Break
+                    } else {
+                        ControlFlow::Continue
+                    }
                 }),
                 _ => return,
             }
@@ -103,9 +112,9 @@ impl<E: EventHandler> RMGfxContext<E> {
         let window = match win_rx.recv().expect("this shouldn't happen") {
             Ok(window) => window,
             Err(err) => {
-                start_tx.send(Signal::Stop);
-                event_thread_handle.join();
-                Err(error::CreationError::WindowCreationError {
+                let _ = start_tx.send(Signal::Stop);
+                let _ = event_thread_handle.join();
+                Err(CreationError::WindowCreationError {
                     err
                 })?
             }
@@ -123,13 +132,13 @@ impl<E: EventHandler> RMGfxContext<E> {
     }
 
     pub fn run_forever(&mut self) -> Result<(), Error> {
-        info!(self.logger, "started run_forever");
-        self.control_handle.send(Signal::Start);
+        info!(self.logger, "started running");
+        self.control_handle.send(Signal::Start).map_err(|_| ContextError::StartChannelError)?;
         loop {
-            let event = self.event_rx.recv().map_err(|e| error::ContextError::EventChannelError { err: e })?;
+            let event = self.event_rx.recv().map_err(|e| ContextError::EventChannelError { err: e })?;
             self
                 .event_handler
-                .handle_event(unimplemented!()); 
+                .handle_event(Event::from(event));
         }
     }
 }

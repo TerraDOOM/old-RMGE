@@ -5,7 +5,7 @@ use gfx_hal::{
     format::{Aspects, Format},
     device::Device,
     buffer::Usage as BufferUsage,
-    image::{Layout, Usage, SubresourceRange},
+    image::{Layout, SubresourceRange},
     memory::{Properties, Requirements},
     pool::CommandPool,
     queue::{

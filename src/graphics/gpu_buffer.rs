@@ -1,7 +1,4 @@
-use std::{
-    marker::PhantomData,
-    mem::{self, ManuallyDrop},
-};
+use std::{marker::PhantomData, mem::ManuallyDrop};
 
 use gfx_hal::{
     adapter::{Adapter, MemoryTypeId, PhysicalDevice},
@@ -11,6 +8,8 @@ use gfx_hal::{
     Backend,
 };
 
+/// TODO: start using this instead of BufferBundle, this is supposed to be a more Vec like implementation
+#[allow(dead_code)]
 pub struct GpuBuffer<B: Backend, D: Device<B>, T> {
     buffer: BufferBundle<B, D>,
     cap: usize,
@@ -19,11 +18,23 @@ pub struct GpuBuffer<B: Backend, D: Device<B>, T> {
 }
 
 impl<B: Backend, D: Device<B>, T> GpuBuffer<B, D, T> {
-    pub fn new(adapter: &Adapter<B>, device: &D, starting_size: usize, usage: BufferUsage) -> Result<Self, &'static str> {
+    /// TODO: again, make this work and start using it or something
+    #[allow(dead_code)]
+    pub fn new(
+        adapter: &Adapter<B>,
+        device: &D,
+        starting_size: usize,
+        usage: BufferUsage,
+    ) -> Result<Self, &'static str> {
         let buffer = BufferBundle::new(adapter, device, starting_size, usage)?;
         let cap = starting_size;
         let len = 0;
-        Ok(GpuBuffer { buffer, cap, len, _phantom: PhantomData, })
+        Ok(GpuBuffer {
+            buffer,
+            cap,
+            len,
+            _phantom: PhantomData,
+        })
     }
 }
 

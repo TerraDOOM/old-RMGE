@@ -18,39 +18,35 @@ mod vertex;
 use crate::geometry::Quad;
 use arrayvec::ArrayVec;
 use core::{
-    marker::PhantomData,
     mem::{self, ManuallyDrop},
     ops::Deref,
 };
 use gfx_hal::{
-    adapter::{Adapter, MemoryTypeId, PhysicalDevice},
+    adapter::{Adapter, PhysicalDevice},
     buffer::{IndexBufferView, Usage as BufferUsage},
     command::{ClearColor, ClearValue, CommandBuffer, MultiShot, Primary},
     device::Device,
     format::{Aspects, ChannelType, Format, Swizzle},
-    image::{Extent, Layout, SubresourceRange, Usage, ViewKind},
-    memory::{Properties, Requirements},
+    image::{Extent, Layout, Usage, SubresourceRange, ViewKind},
     pass::{Attachment, AttachmentLoadOp, AttachmentOps, AttachmentStoreOp, Subpass, SubpassDesc},
     pool::{CommandPool, CommandPoolCreateFlags},
     pso::{
-        AttributeDesc, BakedStates, BasePipeline, BlendDesc, BlendOp, BlendState, ColorBlendDesc,
-        ColorMask, DepthStencilDesc, DepthTest, DescriptorSetLayoutBinding, ElemOffset, ElemStride,
-        Element, EntryPoint, Face, Factor, FrontFace, GraphicsPipelineDesc, GraphicsShaderSet,
+        AttributeDesc, BakedStates, BasePipeline, BlendDesc, BlendState, ColorBlendDesc,
+        ColorMask, DepthStencilDesc, DepthTest, DescriptorSetLayoutBinding, ElemStride,
+        EntryPoint, Face,  FrontFace, GraphicsPipelineDesc, GraphicsShaderSet,
         InputAssemblerDesc, LogicOp, PipelineCreationFlags, PipelineStage, PolygonMode, Rasterizer,
         Rect, ShaderStageFlags, Specialization, StencilTest, VertexBufferDesc, Viewport,
     },
     queue::{
-        capability::{Capability, Supports, Transfer},
         family::QueueGroup,
-        CommandQueue, Submission,
+        Submission,
     },
     window::{Backbuffer, Extent2D, FrameSync, PresentMode, Swapchain, SwapchainConfig},
     Backend, DescriptorPool, Gpu, Graphics, IndexType, Instance, Primitive, QueueFamily, Surface,
 };
 use gpu_buffer::BufferBundle;
 use loadedimage::LoadedImage;
-use slog::{Drain, Logger};
-use std::time::Instant;
+use slog::Logger;
 use vertex::Vertex;
 
 const MAX_QUADS: usize = 4096;
@@ -83,7 +79,6 @@ impl TexturedQuad {
         ]
     }
     pub fn to_vertices(self) -> [Vertex; 4] {
-        use crate::geometry::Point2D as P;
         let uv_rect = self.uv_rect;
         let Quad {
             top_left,
@@ -205,7 +200,6 @@ impl TexturedQuad {
 }
 
 pub struct HalState {
-    creation_instant: Instant,
     num_quads: usize,
     vertices: BufferBundle<back::Backend, back::Device>,
     indexes: BufferBundle<back::Backend, back::Device>,
@@ -580,7 +574,6 @@ impl HalState {
             texture,
             descriptor_pool: ManuallyDrop::new(descriptor_pool),
             descriptor_set: ManuallyDrop::new(descriptor_set),
-            creation_instant: Instant::now(),
             logger,
             current_frame: 0,
             frames_in_flight,
@@ -606,8 +599,11 @@ impl HalState {
     }
 
     pub fn extend_quad_alloc(&mut self, new_max: usize) -> Result<(), &'static str> {
+        
         const F32_XY_RGB_UV_UVRECT_QUAD: usize = mem::size_of::<Vertex>() * 4;
         if new_max as u64 > self.vertices.requirements.size / F32_XY_RGB_UV_UVRECT_QUAD as u64 {
+            info!(&self.logger, "extending quad vertex/index buffer size"; "new_size" => new_max);
+
             unsafe {
                 let new_vertices = BufferBundle::new(
                     &self._adapter,
@@ -658,15 +654,15 @@ impl HalState {
                 }
                 if let Err(_) = self.device.release_mapping_writer(data_target) {
                     new_vertices.manually_drop(&self.device);
-                    new_indexes.manually_drop(&self.device);
-                    return Err("Couldn't release the index buffer mapping writer!");
+                        new_indexes.manually_drop(&self.device);
+                        return Err("Couldn't release the index buffer mapping writer!");
+                    }
+                    let old_vertex_buffer = mem::replace(&mut self.vertices, new_vertices);
+                    let old_index_buffer = mem::replace(&mut self.indexes, new_indexes);
+                    old_vertex_buffer.manually_drop(&self.device);
+                    old_index_buffer.manually_drop(&self.device);
+                    self.num_quads = new_max;
                 }
-                let old_vertex_buffer = mem::replace(&mut self.vertices, new_vertices);
-                let old_index_buffer = mem::replace(&mut self.indexes, new_indexes);
-                old_vertex_buffer.manually_drop(&self.device);
-                old_index_buffer.manually_drop(&self.device);
-                self.num_quads = new_max;
-            }
         }
         Ok(())
     }
@@ -780,7 +776,6 @@ impl HalState {
                 .map_err(|_| "Couldn't release the mapping writer")?;
         }
 
-        let duration = Instant::now().duration_since(self.creation_instant);
         let uv_rect = textured_quads[0].uv_rect;
         // record commands
         unsafe {
@@ -929,7 +924,7 @@ impl HalState {
             rate: 0,
         }];
 
-        let mut attributes: Vec<AttributeDesc> = Vertex::attributes();
+        let attributes: Vec<AttributeDesc> = Vertex::attributes();
 
         let rasterizer = Rasterizer {
             depth_clamping: false,
@@ -971,8 +966,10 @@ impl HalState {
             depth_bounds: None,
         };
         let input_assembler = InputAssemblerDesc::new(Primitive::TriangleList);
-        let bindings = Vec::<DescriptorSetLayoutBinding>::new();
-        let immutable_samplers = Vec::<<back::Backend as Backend>::Sampler>::new();
+        // Apparently these variables are unused, but yeah, gonna keep them as comments here just in case
+        // let bindings = Vec::<DescriptorSetLayoutBinding>::new();
+        // let immutable_samplers = Vec::<<back::Backend as Backend>::Sampler>::new();
+        
         // 1. you make a DescriptorSetLayout which is the layout of one descriptor
         //    set
         let descriptor_set_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout> =
