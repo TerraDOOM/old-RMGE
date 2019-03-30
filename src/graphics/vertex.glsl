@@ -20,14 +20,8 @@ void main()
   vec2 tex_size = textureSize(sampler2D(tex[tex_num], samp), 0);
   gl_Position = vec4(position, 0.0, 1.0);
 
-  vec4 uv_rect = uv_rect;
-
-  if (uv_rect == vec4(0.0, 0.0, 0.0, 0.0)) {
-    uv_rect = vec4(0.0, 0.0, float(tex_size.x), float(tex_size.y));
-  }
-
-  vec2 x_scale = vec2(uv_rect.x, uv_rect.z) / float(tex_size.x);
-  vec2 y_scale = vec2(uv_rect.y, uv_rect.w) / float(tex_size.y);
+  vec2 x_scale = uv_rect.xz / float(tex_size.x);
+  vec2 y_scale = uv_rect.yw / float(tex_size.y);
 
   v_tex_num = tex_num;
   

@@ -8,7 +8,6 @@ pub struct Rectangle {
 
 impl Rectangle {
     /// Yeah this should probably be used at some point, will remove if it never gets used when the project is becoming more stable
-    #[allow(dead_code)]
     pub fn to_quad(self) -> Quad {
         let Rectangle { x, y, w, h } = self;
         Quad {

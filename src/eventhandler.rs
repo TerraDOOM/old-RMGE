@@ -52,13 +52,6 @@ struct ButtonMap {
     map: Vec<Option<VirtualKeyCode>>,
 }
 
-impl ButtonMap {
-    #[allow(dead_code)]
-    fn map_button(&self, button: ButtonId) -> Option<VirtualKeyCode> {
-        (self.map.get(button as usize).cloned()).unwrap_or(None)
-    }
-}
-
 pub trait EventHandler {
     fn handle_event(&mut self, event: Event);
 }

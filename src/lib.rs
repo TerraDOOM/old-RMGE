@@ -7,9 +7,6 @@ pub extern crate slog;
 extern crate failure;
 extern crate slog_stdlog;
 
-/// NOTE: PLACEHOLDER FOR NOW
-static CREATURE_BYTES: &[u8] = include_bytes!("creature-smol.png");
-
 pub mod error;
 mod eventhandler;
 pub mod geometry;
