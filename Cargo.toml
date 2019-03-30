@@ -21,6 +21,9 @@ version = "0.1"
 slog-async = "2.3.0"
 slog-term = "2.4.0"
 
+[badges]
+travis-ci = { repository = "TerraDOOM/RMGE" }
+
 [[example]]
 name = "main"
 
