@@ -1,8 +1,8 @@
-use std::mem;
 use gfx_hal::{
-    pso::{AttributeDesc, Element, ElemOffset},
     format::Format,
+    pso::{AttributeDesc, ElemOffset, Element},
 };
+use std::mem;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
@@ -28,13 +28,13 @@ impl Vertex {
             },
         };
         /*let color_attribute = AttributeDesc {
-        location: 1,
-        binding: 0,
-        element: Element {
-        format: Format::Rgb32Float,
-        offset: POSITION_ATTR_SIZE as ElemOffset,
-    },
-    };*/
+            location: 1,
+            binding: 0,
+            element: Element {
+            format: Format::Rgb32Float,
+            offset: POSITION_ATTR_SIZE as ElemOffset,
+        },
+        };*/
         let uv_attribute = AttributeDesc {
             location: 1,
             binding: 0,
@@ -49,7 +49,7 @@ impl Vertex {
             element: Element {
                 format: Format::Rgba32Float,
                 offset: (POSITION_ATTR_SIZE + UV_ATTR_SIZE) as ElemOffset,
-            }
+            },
         };
         let tex_num_attribute = AttributeDesc {
             location: 3,
@@ -57,10 +57,15 @@ impl Vertex {
             element: Element {
                 format: Format::R32Uint,
                 offset: (POSITION_ATTR_SIZE + UV_ATTR_SIZE + UV_RECT_ATTR_SIZE) as ElemOffset,
-            }
+            },
         };
-        
-        vec![position_attribute, uv_attribute, uv_rect_attribute, tex_num_attribute]
+
+        vec![
+            position_attribute,
+            uv_attribute,
+            uv_rect_attribute,
+            tex_num_attribute,
+        ]
     }
     #[deprecated]
     pub fn to_array(self) -> [f32; 2 + 2 + 4] {

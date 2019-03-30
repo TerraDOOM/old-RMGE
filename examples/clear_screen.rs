@@ -1,13 +1,13 @@
-extern crate slog_term;
-extern crate slog_async;
 extern crate rmge;
+extern crate slog_async;
+extern crate slog_term;
 #[macro_use]
 extern crate slog;
 
 use slog::Drain;
 
-use rmge::{WindowState, HalState, Triangle, Point2D};
-use winit::{EventsLoop, WindowBuilder, Window, WindowEvent, Event};
+use rmge::{HalState, Point2D, Triangle, WindowState};
+use winit::{Event, EventsLoop, Window, WindowBuilder, WindowEvent};
 
 #[derive(Debug, Clone, Default)]
 pub struct UserInput {
@@ -81,7 +81,10 @@ impl Coords {
     }
 }
 
-fn do_the_triangle_render(hal_state: &mut HalState, local_state: &LocalState) -> Result<(), &'static str> {
+fn do_the_triangle_render(
+    hal_state: &mut HalState,
+    local_state: &LocalState,
+) -> Result<(), &'static str> {
     let x = ((local_state.mouse_x / local_state.frame_width) * 2.0) - 1.0;
     let y = ((local_state.mouse_y / local_state.frame_height) * 2.0) - 1.0;
     let triangle: [[f32; 2]; 3] = [[-0.5, 0.5], [-0.5, -0.5], [x as f32, y as f32]];
@@ -96,7 +99,9 @@ fn main() {
 
     let log = slog::Logger::root(drain, o!("version" => "0.1"));
 
-    let mut winit_state = WindowState::new("rustmania", (800.0, 600.0), Some(log.new(o!("child" => 1)))).expect("failed to create window");
+    let mut winit_state =
+        WindowState::new("rustmania", (800.0, 600.0), Some(log.new(o!("child" => 1))))
+            .expect("failed to create window");
     let mut hal_state = match HalState::new(&winit_state) {
         Ok(state) => state,
         Err(e) => panic!(e),

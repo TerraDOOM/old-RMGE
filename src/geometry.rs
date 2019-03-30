@@ -37,21 +37,21 @@ pub struct Triangle {
 
 impl Quad {
     /*pub fn vertex_attributes(self) -> [Vertex; 4] {
-    let Quad {
-    top_left,
-    bottom_left,
-    bottom_right,
-    top_right,
-} = self;
-    #[cfg_attr(rustfmt, rustfmt_skip)]
-    [/*
-    X               Y               R    G    B                  U    V                    */
+        let Quad {
+        top_left,
+        bottom_left,
+        bottom_right,
+        top_right,
+    } = self;
+        #[cfg_attr(rustfmt, rustfmt_skip)]
+        [/*
+        X               Y               R    G    B                  U    V                    */
     top_left.x,     top_left.y,     1.0, 0.0, 0.0, /* red     */ 0.0, 1.0, /* bottom left  */
     bottom_left.x,  bottom_left.y,  0.0, 1.0, 0.0, /* green   */ 0.0, 0.0, /* top left     */
     bottom_right.x, bottom_right.y, 0.0, 0.0, 1.0, /* blue    */ 1.0, 0.0, /* bottom right */
     top_right.x,    top_right.y,    1.0, 0.0, 1.0, /* magenta */ 1.0, 1.0, /* top right    */
-]
-}*/
+    ]
+    }*/
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -74,4 +74,3 @@ impl From<[f32; 2]> for Point2D {
         Point2D { x, y }
     }
 }
-

@@ -6,7 +6,7 @@ impl From<(Instant, winit::Event)> for Event {
         let (time, event) = arg;
         Event {
             time,
-            event: RMEvent::from(event)
+            event: RMEvent::from(event),
         }
     }
 }
@@ -30,16 +30,16 @@ impl From<winit::Event> for RMEvent {
 #[derive(Debug, Clone)]
 pub struct RMEventHandler<E: EventHandler> {
     event_handler: E,
-    button_map: ButtonMap,    
+    button_map: ButtonMap,
 }
 
 impl<E: EventHandler> RMEventHandler<E> {
     pub fn new(_e: E) -> Self {
         unimplemented!()
     }
-    
+
     pub fn handle_event(&mut self, event: Event) {
-        // do some processing on the event... 
+        // do some processing on the event...
         self.event_handler.handle_event(event)
     }
 }

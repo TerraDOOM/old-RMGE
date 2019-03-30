@@ -1,14 +1,14 @@
 extern crate winit;
 #[macro_use]
 extern crate slog;
-extern crate slog_term;
-extern crate slog_async;
 extern crate rmge;
+extern crate slog_async;
+extern crate slog_term;
 
 use slog::Drain;
 
-use winit::{EventsLoop, Event, Window, WindowEvent};
 use gfx_hal::window::PresentMode::*;
+use winit::{Event, EventsLoop, Window, WindowEvent};
 
 use rmge::geometry::Rectangle;
 
@@ -70,7 +70,10 @@ impl LocalState {
     }
 }
 
-fn do_the_quad_render(hal_state: &mut HalState, local_state: &LocalState) -> Result<(), &'static str> {
+fn do_the_quad_render(
+    hal_state: &mut HalState,
+    local_state: &LocalState,
+) -> Result<(), &'static str> {
     let x1 = 100.0;
     let y1 = 100.0;
     let x2 = local_state.mouse_x as f32;
@@ -87,7 +90,7 @@ fn do_the_quad_render(hal_state: &mut HalState, local_state: &LocalState) -> Res
             x: x + 0.5,
             y: y - 0.5,
             w,
-            h
+            h,
         }
     };
     let textured_quad = TexturedQuad {
@@ -114,7 +117,13 @@ fn main() {
     let log = slog::Logger::root(drain, o!());
 
     let mut window = Window::new(&events_loop).unwrap();
-    let mut hal_state = match HalState::new(&window, "rustmania", 512, [Mailbox, Fifo, Relaxed, Immediate], log.new(o!())) {
+    let mut hal_state = match HalState::new(
+        &window,
+        "rustmania",
+        512,
+        [Mailbox, Fifo, Relaxed, Immediate],
+        log.new(o!()),
+    ) {
         Ok(state) => state,
         Err(e) => panic!(e),
     };
@@ -128,9 +137,13 @@ fn main() {
         mouse_x: 0.0,
         mouse_y: 0.0,
     };
-    hal_state.load_texture(include_bytes!("creature-smol.png")).unwrap();
-    hal_state.load_texture(include_bytes!("judgment.png")).unwrap();
-    
+    hal_state
+        .load_texture(include_bytes!("creature-smol.png"))
+        .unwrap();
+    hal_state
+        .load_texture(include_bytes!("judgment.png"))
+        .unwrap();
+
     loop {
         let inputs = UserInput::poll_events_loop(&mut events_loop);
         if inputs.end_requested {
@@ -139,25 +152,43 @@ fn main() {
         if let Some(a) = inputs.new_frame_size {
             debug!(&log, "Window changed size"; o!("x" => a.0, "y" => a.1));
             core::mem::drop(hal_state);
-            hal_state = match HalState::new(&window, "rustmania", 512, [Mailbox, Fifo, Relaxed, Immediate], log.new(o!())) {
+            hal_state = match HalState::new(
+                &window,
+                "rustmania",
+                512,
+                [Mailbox, Fifo, Relaxed, Immediate],
+                log.new(o!()),
+            ) {
                 Ok(state) => state,
                 Err(e) => panic!(e),
             };
-            hal_state.load_texture(include_bytes!("creature-smol.png")).unwrap();
-            hal_state.load_texture(include_bytes!("judgment.png")).unwrap();
+            hal_state
+                .load_texture(include_bytes!("creature-smol.png"))
+                .unwrap();
+            hal_state
+                .load_texture(include_bytes!("judgment.png"))
+                .unwrap();
         }
         local_state.update_from_input(inputs);
         if let Err(e) = do_the_quad_render(&mut hal_state, &local_state) {
             error!(&log, "render error"; "render_error" => e);
             debug!(&log, "Auto-restarting HalState...");
-            hal_state = match HalState::new(&window, "rustmania", 512, [Mailbox, Fifo, Relaxed, Immediate], log.new(o!())) {
+            hal_state = match HalState::new(
+                &window,
+                "rustmania",
+                512,
+                [Mailbox, Fifo, Relaxed, Immediate],
+                log.new(o!()),
+            ) {
                 Ok(state) => state,
                 Err(e) => panic!(e),
             };
-            hal_state.load_texture(include_bytes!("creature-smol.png")).unwrap();
-            hal_state.load_texture(include_bytes!("judgment.png")).unwrap();
+            hal_state
+                .load_texture(include_bytes!("creature-smol.png"))
+                .unwrap();
+            hal_state
+                .load_texture(include_bytes!("judgment.png"))
+                .unwrap();
         }
     }
-
 }
-

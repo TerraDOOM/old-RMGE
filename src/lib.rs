@@ -1,26 +1,28 @@
 extern crate winit;
-#[macro_use] pub extern crate slog;
-#[macro_use] extern crate failure;
+#[macro_use]
+pub extern crate slog;
+#[macro_use]
+extern crate failure;
 extern crate slog_stdlog;
 
 /// NOTE: PLACEHOLDER FOR NOW
 static CREATURE_BYTES: &[u8] = include_bytes!("creature-smol.png");
 
-pub mod geometry;
-pub mod graphics;
 pub mod error;
 mod eventhandler;
+pub mod geometry;
+pub mod graphics;
 
-use crate::graphics::{HalState};
-use crate::eventhandler::{EventHandler, RMEventHandler, Event};
+use crate::eventhandler::{Event, EventHandler, RMEventHandler};
+use crate::graphics::HalState;
 
 use crate::error::{ContextError, CreationError};
 
-use failure::Error; 
+use failure::Error;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::Instant;
-use winit::{dpi::LogicalSize, EventsLoop, Window, WindowBuilder, ControlFlow};
+use winit::{dpi::LogicalSize, ControlFlow, EventsLoop, Window, WindowBuilder};
 
 #[derive(Debug)]
 struct RMGraphics {
@@ -50,7 +52,12 @@ enum Signal {
 }
 
 impl<E: EventHandler> RMGfxContext<E> {
-    pub fn new(event_handler: E, window_title: &str, dimensions: (f64, f64), logger: slog::Logger) -> Result<Self, Error> {
+    pub fn new(
+        event_handler: E,
+        window_title: &str,
+        dimensions: (f64, f64),
+        logger: slog::Logger,
+    ) -> Result<Self, Error> {
         let (win_tx, win_rx) = mpsc::channel();
         let (start_tx, start_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
@@ -87,7 +94,7 @@ impl<E: EventHandler> RMGfxContext<E> {
             };
 
             info!(logger, "window created, waiting for start signal");
-            
+
             match start_rx.recv() {
                 Ok(Signal::Start) => event_loop.run_forever(|event| {
                     let timestamp = Instant::now();
@@ -107,9 +114,7 @@ impl<E: EventHandler> RMGfxContext<E> {
             Err(err) => {
                 let _ = start_tx.send(Signal::Stop);
                 let _ = event_thread_handle.join();
-                Err(CreationError::WindowCreationError {
-                    err
-                })?
+                Err(CreationError::WindowCreationError { err })?
             }
         };
 
@@ -126,12 +131,15 @@ impl<E: EventHandler> RMGfxContext<E> {
 
     pub fn run_forever(&mut self) -> Result<(), Error> {
         info!(self.logger, "started running");
-        self.control_handle.send(Signal::Start).map_err(|_| ContextError::StartChannelError)?;
+        self.control_handle
+            .send(Signal::Start)
+            .map_err(|_| ContextError::StartChannelError)?;
         loop {
-            let event = self.event_rx.recv().map_err(|e| ContextError::EventChannelError { err: e })?;
-            self
-                .event_handler
-                .handle_event(Event::from(event));
+            let event = self
+                .event_rx
+                .recv()
+                .map_err(|e| ContextError::EventChannelError { err: e })?;
+            self.event_handler.handle_event(Event::from(event));
         }
     }
 }

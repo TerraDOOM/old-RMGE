@@ -63,22 +63,22 @@ pub struct TexturedQuad {
 
 impl TexturedQuad {
     /*pub fn to_f32s(self) -> [f32; 4 * (2 + 2 + 4)] {
-    let [uvx, uvy, uvz, uvw] = self.uv_rect;
-    let Quad {
-    top_left,
-    bottom_left,
-    bottom_right,
-    top_right,
-} = self.quad;
-    #[cfg_attr(rustfmt, rustfmt_skip)]
-    [/*
-    X               Y               R    G    B                  U    V                    */ /* uv_rect       */
+        let [uvx, uvy, uvz, uvw] = self.uv_rect;
+        let Quad {
+        top_left,
+        bottom_left,
+        bottom_right,
+        top_right,
+    } = self.quad;
+        #[cfg_attr(rustfmt, rustfmt_skip)]
+        [/*
+        X               Y               R    G    B                  U    V                    */ /* uv_rect       */
     top_left.x,     top_left.y,     1.0, 0.0, 0.0, /* red     */ 0.0, 1.0, /* bottom left  */ uvx, uvy, uvz, uvw,
     bottom_left.x,  bottom_left.y,  0.0, 1.0, 0.0, /* green   */ 0.0, 0.0, /* top left     */ uvx, uvy, uvz, uvw,
     bottom_right.x, bottom_right.y, 0.0, 0.0, 1.0, /* blue    */ 1.0, 0.0, /* bottom right */ uvx, uvy, uvz, uvw,
     top_right.x,    top_right.y,    1.0, 0.0, 1.0, /* magenta */ 1.0, 1.0, /* top right    */ uvx, uvy, uvz, uvw,
-]
-}*/
+    ]
+    }*/
     pub fn to_vertices(self) -> [Vertex; 4] {
         let uv_rect = self.uv_rect;
         let Quad {
@@ -630,7 +630,8 @@ impl HalState {
                     binding: 0,
                     // logic here is that hopefully the modulo will basically find which descriptor set we're supposed to write to
                     // it probably works because they're all the same size
-                    array_offset: num_textures % (num_descriptor_sets * self.texture_pool.descriptor_size),
+                    array_offset: num_textures
+                        % (num_descriptor_sets * self.texture_pool.descriptor_size),
                     descriptors: Some(gfx_hal::pso::Descriptor::Image(
                         texture.image_view.deref(),
                         Layout::Undefined,

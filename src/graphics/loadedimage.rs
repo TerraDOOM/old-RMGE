@@ -1,23 +1,24 @@
 use crate::graphics::gpu_buffer::BufferBundle;
 
 use gfx_hal::{
-    Backend,
     adapter::{Adapter, MemoryTypeId, PhysicalDevice},
-    format::{Aspects, Format},
-    device::Device,
     buffer::Usage as BufferUsage,
+    device::Device,
+    format::{Aspects, Format},
     image::{Layout, SubresourceRange},
     memory::{Properties, Requirements},
     pool::CommandPool,
+    pso::PipelineStage,
     queue::{
         capability::{Capability, Supports, Transfer},
         CommandQueue,
     },
-    pso::{
-        PipelineStage,
-    }
+    Backend,
 };
-use std::{mem::{self, ManuallyDrop}, marker::PhantomData};
+use std::{
+    marker::PhantomData,
+    mem::{self, ManuallyDrop},
+};
 
 pub struct TexturePool<B: Backend, D: Device<B>> {
     pub textures: Vec<LoadedImage<B, D>>,
@@ -92,37 +93,37 @@ impl<B: Backend, D: Device<B>> LoadedImage<B, D> {
             let memory_type_id = adapter
                 .physical_device
                 .memory_properties()
-                    .memory_types
-                    .iter()
-                    .enumerate()
-                    .find(|&(id, memory_type)| {
-                        // BIG NOTE: THIS IS DEVICE LOCAL NOT CPU VISIBLE
-                        requirements.type_mask & (1 << id) != 0
-                            && memory_type.properties.contains(Properties::DEVICE_LOCAL)
-                    })
-                    .map(|(id, _)| MemoryTypeId(id))
-                    .ok_or("Couldn't find memory type to support the image!")?;
-                let memory = device
-                    .allocate_memory(memory_type_id, requirements.size)
-                    .map_err(|_| "Couldn't allocate image memory!")?;
-                device
-                    .bind_image_memory(&memory, 0, &mut the_image)
-                    .map_err(|_| "Couldn't bind the image memory!")?;
+                .memory_types
+                .iter()
+                .enumerate()
+                .find(|&(id, memory_type)| {
+                    // BIG NOTE: THIS IS DEVICE LOCAL NOT CPU VISIBLE
+                    requirements.type_mask & (1 << id) != 0
+                        && memory_type.properties.contains(Properties::DEVICE_LOCAL)
+                })
+                .map(|(id, _)| MemoryTypeId(id))
+                .ok_or("Couldn't find memory type to support the image!")?;
+            let memory = device
+                .allocate_memory(memory_type_id, requirements.size)
+                .map_err(|_| "Couldn't allocate image memory!")?;
+            device
+                .bind_image_memory(&memory, 0, &mut the_image)
+                .map_err(|_| "Couldn't bind the image memory!")?;
 
-                // 5. create image view and sampler
-                let image_view = device
-                    .create_image_view(
-                        &the_image,
-                        gfx_hal::image::ViewKind::D2,
-                        Format::Rgba8Srgb,
-                        gfx_hal::format::Swizzle::NO,
-                        SubresourceRange {
-                            aspects: Aspects::COLOR,
-                            levels: 0..1,
-                            layers: 0..1,
-                        },
-                    )
-                    .map_err(|_| "Couldn't create the image view!")?;
+            // 5. create image view and sampler
+            let image_view = device
+                .create_image_view(
+                    &the_image,
+                    gfx_hal::image::ViewKind::D2,
+                    Format::Rgba8Srgb,
+                    gfx_hal::format::Swizzle::NO,
+                    SubresourceRange {
+                        aspects: Aspects::COLOR,
+                        levels: 0..1,
+                        layers: 0..1,
+                    },
+                )
+                .map_err(|_| "Couldn't create the image view!")?;
 
             // 6. create a CommandBuffer
             let mut cmd_buffer = command_pool.acquire_command_buffer::<gfx_hal::command::OneShot>();
@@ -201,32 +202,32 @@ impl<B: Backend, D: Device<B>> LoadedImage<B, D> {
             // 10. Submit the cmd buffer to queue and wait for it
             cmd_buffer.finish();
             let upload_fence = device
-                    .create_fence(false)
-                    .map_err(|_| "Couldn't create an upload fence!")?;
-                command_queue.submit_nosemaphores(Some(&cmd_buffer), Some(&upload_fence));
-                device
-                    .wait_for_fence(&upload_fence, core::u64::MAX)
-                    .map_err(|_| "Couldn't wait for the fence!")?;
-                device.destroy_fence(upload_fence);
+                .create_fence(false)
+                .map_err(|_| "Couldn't create an upload fence!")?;
+            command_queue.submit_nosemaphores(Some(&cmd_buffer), Some(&upload_fence));
+            device
+                .wait_for_fence(&upload_fence, core::u64::MAX)
+                .map_err(|_| "Couldn't wait for the fence!")?;
+            device.destroy_fence(upload_fence);
 
-                // 11. Destroy the staging bundle and one shot buffer now that we're done
-                staging_bundle.manually_drop(device);
-                command_pool.free(Some(cmd_buffer));
+            // 11. Destroy the staging bundle and one shot buffer now that we're done
+            staging_bundle.manually_drop(device);
+            command_pool.free(Some(cmd_buffer));
 
-                Ok(LoadedImage {
-                    image: ManuallyDrop::new(the_image),
-                    requirements,
-                    memory: ManuallyDrop::new(memory),
-                    image_view: ManuallyDrop::new(image_view),
-                    phantom: PhantomData,
-                })
-            }
-        }
-
-        pub unsafe fn manually_drop(&self, device: &D) {
-            use core::ptr::read;
-            device.destroy_image_view(ManuallyDrop::into_inner(read(&self.image_view)));
-            device.destroy_image(ManuallyDrop::into_inner(read(&self.image)));
-            device.free_memory(ManuallyDrop::into_inner(read(&self.memory)));
+            Ok(LoadedImage {
+                image: ManuallyDrop::new(the_image),
+                requirements,
+                memory: ManuallyDrop::new(memory),
+                image_view: ManuallyDrop::new(image_view),
+                phantom: PhantomData,
+            })
         }
     }
+
+    pub unsafe fn manually_drop(&self, device: &D) {
+        use core::ptr::read;
+        device.destroy_image_view(ManuallyDrop::into_inner(read(&self.image_view)));
+        device.destroy_image(ManuallyDrop::into_inner(read(&self.image)));
+        device.free_memory(ManuallyDrop::into_inner(read(&self.memory)));
+    }
+}
