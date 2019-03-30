@@ -95,7 +95,7 @@ fn do_the_quad_render(
     };
     let textured_quad = TexturedQuad {
         quad: quad.to_quad(),
-        uv_rect: [80.0, 30.0, 180.0, 70.0],
+        uv_rect: [0.0, 0.0, 300.0, 300.0],
         tex_num: 0,
     };
     let textured_quad2 = TexturedQuad {

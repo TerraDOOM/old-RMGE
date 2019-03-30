@@ -17,7 +17,7 @@ layout (location = 3) flat out uint v_tex_num;
 
 void main()
 {
-  vec2 tex_size = textureSize(sampler2D(tex[0], samp), 0);
+  vec2 tex_size = textureSize(sampler2D(tex[tex_num], samp), 0);
   gl_Position = vec4(position, 0.0, 1.0);
 
   vec4 uv_rect = uv_rect;
@@ -28,9 +28,6 @@ void main()
 
   vec2 x_scale = vec2(uv_rect.x, uv_rect.z) / float(tex_size.x);
   vec2 y_scale = vec2(uv_rect.y, uv_rect.w) / float(tex_size.y);
-
-  x_scale = vec2(0.0, 1.0);
-  y_scale = vec2(0.0, 1.0);
 
   v_tex_num = tex_num;
   
