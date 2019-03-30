@@ -1,11 +1,7 @@
 #![cfg_attr(feature = "deny-all-warnings", deny(warnings))]
 
-extern crate winit;
 #[macro_use]
 pub extern crate slog;
-#[macro_use]
-extern crate failure;
-extern crate slog_stdlog;
 
 pub mod error;
 mod eventhandler;

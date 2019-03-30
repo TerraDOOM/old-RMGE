@@ -1,5 +1,3 @@
-extern crate shaderc;
-
 #[cfg(feature = "dx12")]
 use gfx_backend_dx12 as back;
 #[cfg(feature = "metal")]
@@ -62,23 +60,6 @@ pub struct TexturedQuad {
 }
 
 impl TexturedQuad {
-    /*pub fn to_f32s(self) -> [f32; 4 * (2 + 2 + 4)] {
-        let [uvx, uvy, uvz, uvw] = self.uv_rect;
-        let Quad {
-        top_left,
-        bottom_left,
-        bottom_right,
-        top_right,
-    } = self.quad;
-        #[cfg_attr(rustfmt, rustfmt_skip)]
-        [/*
-        X               Y               R    G    B                  U    V                    */ /* uv_rect       */
-    top_left.x,     top_left.y,     1.0, 0.0, 0.0, /* red     */ 0.0, 1.0, /* bottom left  */ uvx, uvy, uvz, uvw,
-    bottom_left.x,  bottom_left.y,  0.0, 1.0, 0.0, /* green   */ 0.0, 0.0, /* top left     */ uvx, uvy, uvz, uvw,
-    bottom_right.x, bottom_right.y, 0.0, 0.0, 1.0, /* blue    */ 1.0, 0.0, /* bottom right */ uvx, uvy, uvz, uvw,
-    top_right.x,    top_right.y,    1.0, 0.0, 1.0, /* magenta */ 1.0, 1.0, /* top right    */ uvx, uvy, uvz, uvw,
-    ]
-    }*/
     pub fn to_vertices(self) -> [Vertex; 4] {
         let uv_rect = self.uv_rect;
         let Quad {
@@ -165,7 +146,7 @@ pub struct HalState {
 
 impl std::fmt::Debug for HalState {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        writeln!(f, "HalState  {{ /* stuff */ }} ")
+        writeln!(f, "HalState  {{ /* stuff */ }}")
     }
 }
 
