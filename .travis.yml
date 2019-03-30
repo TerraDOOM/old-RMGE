@@ -22,7 +22,7 @@ matrix:
 
     - name: "warnings"
       rust: stable
-      script: cargo check --all
+      script: cargo check --all --feature deny-all-warnings
 
     - name: "release"
       rust: stable

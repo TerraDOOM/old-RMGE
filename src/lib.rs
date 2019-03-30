@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "deny-all-warnings", deny(warnings))]
+
 extern crate winit;
 #[macro_use]
 pub extern crate slog;
