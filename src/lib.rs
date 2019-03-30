@@ -11,7 +11,7 @@ pub mod graphics;
 pub mod error;
 mod eventhandler;
 
-use crate::graphics::{HalState, HalStateBuilder};
+use crate::graphics::{HalState};
 use crate::eventhandler::{EventHandler, RMEventHandler, Event};
 
 use crate::error::{ContextError, CreationError};
@@ -30,14 +30,7 @@ struct RMGraphics {
 
 impl RMGraphics {
     fn new(window: Window) -> Self {
-        let renderer = HalStateBuilder::new(&window, CREATURE_BYTES)
-            .build()
-            .expect("Failed to build window, crashing because leaked resources");
-        
-        RMGraphics {
-            window,
-            renderer,
-        }
+        unimplemented!()
     }
 }
 

@@ -8,7 +8,9 @@ use gfx_backend_metal as back;
 use gfx_backend_vulkan as back;
 
 macro_rules! debug_repr {
-    ($e:expr) => {format_args!("{:?}", $e)};
+    ($e:expr) => {
+        format_args!("{:?}", $e)
+    };
 }
 
 mod gpu_buffer;
@@ -27,29 +29,27 @@ use gfx_hal::{
     command::{ClearColor, ClearValue, CommandBuffer, MultiShot, Primary},
     device::Device,
     format::{Aspects, ChannelType, Format, Swizzle},
-    image::{Extent, Layout, Usage, SubresourceRange, ViewKind},
+    image::{Extent, Layout, SubresourceRange, Usage, ViewKind},
     pass::{Attachment, AttachmentLoadOp, AttachmentOps, AttachmentStoreOp, Subpass, SubpassDesc},
     pool::{CommandPool, CommandPoolCreateFlags},
     pso::{
-        AttributeDesc, BakedStates, BasePipeline, BlendDesc, BlendState, ColorBlendDesc,
-        ColorMask, DepthStencilDesc, DepthTest, DescriptorSetLayoutBinding, ElemStride,
-        EntryPoint, Face,  FrontFace, GraphicsPipelineDesc, GraphicsShaderSet,
-        InputAssemblerDesc, LogicOp, PipelineCreationFlags, PipelineStage, PolygonMode, Rasterizer,
-        Rect, ShaderStageFlags, Specialization, StencilTest, VertexBufferDesc, Viewport,
+        AttributeDesc, BakedStates, BasePipeline, BlendDesc, BlendState, ColorBlendDesc, ColorMask,
+        DepthStencilDesc, DepthTest, DescriptorSetLayoutBinding, ElemStride, EntryPoint, Face,
+        FrontFace, GraphicsPipelineDesc, GraphicsShaderSet, InputAssemblerDesc, LogicOp,
+        PipelineCreationFlags, PipelineStage, PolygonMode, Rasterizer, Rect, ShaderStageFlags,
+        Specialization, StencilTest, VertexBufferDesc, Viewport,
     },
-    queue::{
-        family::QueueGroup,
-        Submission,
-    },
+    queue::{family::QueueGroup, Submission},
     window::{Backbuffer, Extent2D, FrameSync, PresentMode, Swapchain, SwapchainConfig},
     Backend, DescriptorPool, Gpu, Graphics, IndexType, Instance, Primitive, QueueFamily, Surface,
 };
 use gpu_buffer::BufferBundle;
-use loadedimage::LoadedImage;
+use loadedimage::{LoadedImage, TexturePool};
 use slog::Logger;
 use vertex::Vertex;
 
 const MAX_QUADS: usize = 4096;
+const QUAD_SIZE: usize = mem::size_of::<Vertex>() * 4;
 const VERTEX_SOURCE: &str = include_str!("vertex.glsl");
 const FRAGMENT_SOURCE: &str = include_str!("fragment.glsl");
 
@@ -58,26 +58,27 @@ const FRAGMENT_SOURCE: &str = include_str!("fragment.glsl");
 pub struct TexturedQuad {
     pub quad: Quad,
     pub uv_rect: [f32; 4],
+    pub tex_num: u32,
 }
 
 impl TexturedQuad {
-    pub(crate) fn to_f32s(self) -> [f32; 4 * (2 + 3 + 2 + 4)] {
-        let [uvx, uvy, uvz, uvw] = self.uv_rect;
-        let Quad {
-            top_left,
-            bottom_left,
-            bottom_right,
-            top_right,
-        } = self.quad;
-        #[cfg_attr(rustfmt, rustfmt_skip)]
-        [/*
-         X               Y               R    G    B                  U    V                    */ /* uv_rect       */
-         top_left.x,     top_left.y,     1.0, 0.0, 0.0, /* red     */ 0.0, 1.0, /* bottom left  */ uvx, uvy, uvz, uvw,
-         bottom_left.x,  bottom_left.y,  0.0, 1.0, 0.0, /* green   */ 0.0, 0.0, /* top left     */ uvx, uvy, uvz, uvw,
-         bottom_right.x, bottom_right.y, 0.0, 0.0, 1.0, /* blue    */ 1.0, 0.0, /* bottom right */ uvx, uvy, uvz, uvw,
-         top_right.x,    top_right.y,    1.0, 0.0, 1.0, /* magenta */ 1.0, 1.0, /* top right    */ uvx, uvy, uvz, uvw,
-        ]
-    }
+    /*pub fn to_f32s(self) -> [f32; 4 * (2 + 2 + 4)] {
+    let [uvx, uvy, uvz, uvw] = self.uv_rect;
+    let Quad {
+    top_left,
+    bottom_left,
+    bottom_right,
+    top_right,
+} = self.quad;
+    #[cfg_attr(rustfmt, rustfmt_skip)]
+    [/*
+    X               Y               R    G    B                  U    V                    */ /* uv_rect       */
+    top_left.x,     top_left.y,     1.0, 0.0, 0.0, /* red     */ 0.0, 1.0, /* bottom left  */ uvx, uvy, uvz, uvw,
+    bottom_left.x,  bottom_left.y,  0.0, 1.0, 0.0, /* green   */ 0.0, 0.0, /* top left     */ uvx, uvy, uvz, uvw,
+    bottom_right.x, bottom_right.y, 0.0, 0.0, 1.0, /* blue    */ 1.0, 0.0, /* bottom right */ uvx, uvy, uvz, uvw,
+    top_right.x,    top_right.y,    1.0, 0.0, 1.0, /* magenta */ 1.0, 1.0, /* top right    */ uvx, uvy, uvz, uvw,
+]
+}*/
     pub fn to_vertices(self) -> [Vertex; 4] {
         let uv_rect = self.uv_rect;
         let Quad {
@@ -86,116 +87,52 @@ impl TexturedQuad {
             bottom_right,
             top_right,
         } = self.quad;
+        let tex_num = self.tex_num;
         [
             Vertex {
                 xy: [top_left.x, top_left.y],
-                rgb: [1.0, 0.0, 0.0],
                 uv: [0.0, 1.0],
                 uv_rect,
+                tex_num,
             },
             Vertex {
                 xy: [bottom_left.x, bottom_left.y],
-                rgb: [0.0, 1.0, 0.0],
-                           uv: [0.0, 0.0],
-                           uv_rect,
-                       },
-                       Vertex {
-                           xy: [bottom_right.x, bottom_right.y],
-                           rgb: [0.0, 0.0, 1.0],
-                           uv: [1.0, 0.0],
-                           uv_rect,
-                       },
-                       Vertex {
-                           xy: [top_right.x, top_right.y],
-                           rgb: [1.0, 0.0, 1.0],
-                           uv: [1.0, 1.0],
-                           uv_rect,
-                       },
-                   ]
-               }
-           }
+                uv: [0.0, 0.0],
+                uv_rect,
+                tex_num,
+            },
+            Vertex {
+                xy: [bottom_right.x, bottom_right.y],
+                uv: [1.0, 0.0],
+                uv_rect,
+                tex_num,
+            },
+            Vertex {
+                xy: [top_right.x, top_right.y],
+                uv: [1.0, 1.0],
+                uv_rect,
+                tex_num,
+            },
+        ]
+    }
+}
 
-           #[derive(Copy, Clone, Debug)]
-           pub enum Vsync {
-               TripleBuffered,
-               DoubleBuffered,
-               Relaxed,
-               Immediate,
-           }
+#[derive(Copy, Clone, Debug)]
+pub enum Vsync {
+    TripleBuffered,
+    DoubleBuffered,
+    Relaxed,
+    Immediate,
+}
 
-           impl Into<PresentMode> for Vsync {
-               fn into(self) -> PresentMode {
-                   match self {
-                       Vsync::TripleBuffered => PresentMode::Mailbox,
-                       Vsync::DoubleBuffered => PresentMode::Fifo,
-                       Vsync::Relaxed => PresentMode::Relaxed,
-                       Vsync::Immediate => PresentMode::Immediate,
-                   }
-               }
-           }
-
-           #[derive(Clone, Debug)]
-           pub struct HalStateBuilder<'a, 'b, 'c> {
-               window: &'b winit::Window,
-               name: Option<&'c str>,
-               image: &'a [u8],
-               num_quads: Option<usize>,
-               preferred_vsync: Option<[PresentMode; 4]>,
-               logger: Option<slog::Logger>
-           }
-
-           impl<'a, 'b, 'c> HalStateBuilder<'a, 'b, 'c> {
-               pub fn new(window: &'b winit::Window, image: &'a [u8]) -> Self {
-                   Self {
-                       window,
-                       image,
-                       name: None,
-                       num_quads: None,
-                       preferred_vsync: None,
-                       logger: None,
-                   }
-               }
-
-               pub fn preferred_vsync(mut self, vsync: [Vsync; 4]) -> Self {
-                   self.preferred_vsync = Some([
-                       vsync[0].into(),
-                       vsync[1].into(),
-                       vsync[2].into(),
-                       vsync[3].into(),
-                   ]);
-                   self
-               }
-
-               pub fn num_quads(mut self, num_quads: usize) -> Self {
-                   self.num_quads = Some(num_quads);
-                   self
-               }
-
-               pub fn name(mut self, name: &'c str) -> Self {
-                   self.name = Some(name);
-                   self
-               }
-
-               pub fn build(self) -> Result<HalState, &'static str> {
-                   use gfx_hal::window::PresentMode::*;
-                   let num_quads = self.num_quads.unwrap_or(MAX_QUADS);
-                   let vsync = self
-                       .preferred_vsync
-                       .unwrap_or([Mailbox, Fifo, Relaxed, Immediate]);
-                   let name = self.name.unwrap_or("");
-                   let logger = Logger::root(slog::Discard, o!());
-                   HalState::new(self.window, self.image, name, num_quads, vsync, logger)
-               }
-
-               
-               pub fn build_logged(self, logger: Logger) -> Result<HalState, &'static str> {
-                   use gfx_hal::window::PresentMode::*;
-                   let num_quads = self.num_quads.unwrap_or(MAX_QUADS);
-        let vsync = self
-            .preferred_vsync
-            .unwrap_or([Mailbox, Fifo, Relaxed, Immediate]);
-        let name = self.name.unwrap_or("");
-        HalState::new(self.window, self.image, name, num_quads, vsync, logger)
+impl Into<PresentMode> for Vsync {
+    fn into(self) -> PresentMode {
+        match self {
+            Vsync::TripleBuffered => PresentMode::Mailbox,
+            Vsync::DoubleBuffered => PresentMode::Fifo,
+            Vsync::Relaxed => PresentMode::Relaxed,
+            Vsync::Immediate => PresentMode::Immediate,
+        }
     }
 }
 
@@ -203,11 +140,8 @@ pub struct HalState {
     num_quads: usize,
     vertices: BufferBundle<back::Backend, back::Device>,
     indexes: BufferBundle<back::Backend, back::Device>,
-    texture: LoadedImage<back::Backend, back::Device>,
-    descriptor_pool: ManuallyDrop<<back::Backend as Backend>::DescriptorPool>,
-    descriptor_set: ManuallyDrop<<back::Backend as Backend>::DescriptorSet>,
+    texture_pool: TexturePool<back::Backend, back::Device>,
     logger: Logger,
-    descriptor_set_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout>,
     pipeline_layout: ManuallyDrop<<back::Backend as Backend>::PipelineLayout>,
     graphics_pipeline: ManuallyDrop<<back::Backend as Backend>::GraphicsPipeline>,
     current_frame: usize,
@@ -238,7 +172,6 @@ impl std::fmt::Debug for HalState {
 impl HalState {
     pub fn new(
         window: &winit::Window,
-        texture: &[u8],
         name: &str,
         num_quads: usize,
         preferred_vsync: [PresentMode; 4],
@@ -461,21 +394,29 @@ impl HalState {
             .map(|_| command_pool.acquire_command_buffer())
             .collect();
 
-        let (descriptor_set_layouts, pipeline_layout, graphics_pipeline) =
-            Self::create_pipeline(&mut device, extent, &render_pass, &logger)?;
+        const DESCRIPTOR_SET_IMAGE_COUNT: usize = 64;
 
+        let (descriptor_set_layouts, pipeline_layout, graphics_pipeline) = Self::create_pipeline(
+            &mut device,
+            extent,
+            &render_pass,
+            DESCRIPTOR_SET_IMAGE_COUNT,
+            &logger,
+        )?;
+
+        const DESCRIPTOR_SET_COUNT: usize = 16;
         // 2. you create a descriptor pool, and when making that descriptor pool
         //    you specify how many sets you want to be able to allocate from the
         //    pool, as well as the maximum number of each kind of descriptor you
         //    want to be able to allocate from that pool, total, for all sets.
-        let mut descriptor_pool = unsafe {
+        let mut descriptor_pool = ManuallyDrop::new(unsafe {
             device
                 .create_descriptor_pool(
-                    1, // sets
+                    DESCRIPTOR_SET_COUNT, // sets
                     &[
                         gfx_hal::pso::DescriptorRangeDesc {
                             ty: gfx_hal::pso::DescriptorType::SampledImage,
-                            count: 1,
+                            count: DESCRIPTOR_SET_COUNT * DESCRIPTOR_SET_IMAGE_COUNT,
                         },
                         gfx_hal::pso::DescriptorRangeDesc {
                             ty: gfx_hal::pso::DescriptorType::Sampler,
@@ -484,56 +425,34 @@ impl HalState {
                     ],
                 )
                 .map_err(|_| "Couldn't create a descriptor pool!")?
-        };
+        });
         // 3. you allocate said descriptor set from the pool you made earlier
-        let descriptor_set = unsafe {
-            descriptor_pool
-                .allocate_set(&descriptor_set_layouts[0])
-                .map_err(|_| "Couldn't make a descriptor set!")?
+        let descriptor_sets: Vec<<back::Backend as Backend>::DescriptorSet> =
+            Vec::with_capacity(DESCRIPTOR_SET_COUNT);
+
+        let texture_pool = TexturePool {
+            textures: Vec::with_capacity(DESCRIPTOR_SET_IMAGE_COUNT),
+            descriptor_pool,
+            descriptor_sets,
+            descriptor_set_layouts,
+            samplers: Vec::with_capacity(DESCRIPTOR_SET_COUNT),
+            descriptor_size: DESCRIPTOR_SET_IMAGE_COUNT,
+            pool_size: DESCRIPTOR_SET_COUNT,
         };
 
         // 4. You create the actual descriptors which you want to write into the
         //    allocated descriptor set (in this case an image and a sampler) (see 1-3 in create_pipeline)
-        let texture = LoadedImage::new(
-            &adapter,
-            &device,
-            &mut command_pool,
-            &mut queue_group.queues[0],
-            image::load_from_memory(texture)
-                .expect("Binary corrupted!")
-                .to_rgba(),
-        )?;
-
+        // <this stuff moved to load_texture>
         // 5. You write the descriptors into the descriptor set using
         //    write_descriptor_sets which you pass a set of DescriptorSetWrites
         //    which each write in one or more descriptors to the set
-        unsafe {
-            device.write_descriptor_sets(vec![
-                gfx_hal::pso::DescriptorSetWrite {
-                    set: &descriptor_set,
-                    binding: 0,
-                    array_offset: 0,
-                    descriptors: Some(gfx_hal::pso::Descriptor::Image(
-                        texture.image_view.deref(),
-                        Layout::Undefined,
-                    )),
-                },
-                gfx_hal::pso::DescriptorSetWrite {
-                    set: &descriptor_set,
-                    binding: 1,
-                    array_offset: 0,
-                    descriptors: Some(gfx_hal::pso::Descriptor::Sampler(texture.sampler.deref())),
-                },
-            ]);
-        }
         // 6. You actually bind the descriptor set in the command buffer before
         //    the draw call using bind_graphics_descriptor_sets
 
-        const F32_XY_RGB_UV_UVRECT_QUAD: usize = mem::size_of::<Vertex>() * 4;
         let vertices = BufferBundle::new(
             &adapter,
             &device,
-            F32_XY_RGB_UV_UVRECT_QUAD * num_quads,
+            QUAD_SIZE * num_quads,
             BufferUsage::VERTEX,
         )?;
         const U16_QUAD_INDICES: usize = mem::size_of::<u16>() * 2 * 3;
@@ -571,9 +490,7 @@ impl HalState {
             num_quads,
             vertices,
             indexes,
-            texture,
-            descriptor_pool: ManuallyDrop::new(descriptor_pool),
-            descriptor_set: ManuallyDrop::new(descriptor_set),
+            texture_pool,
             logger,
             current_frame: 0,
             frames_in_flight,
@@ -589,7 +506,6 @@ impl HalState {
             queue_group,
             swapchain: ManuallyDrop::new(swapchain),
             device: ManuallyDrop::new(device),
-            descriptor_set_layouts,
             pipeline_layout: ManuallyDrop::new(pipeline_layout),
             graphics_pipeline: ManuallyDrop::new(graphics_pipeline),
             _adapter: adapter,
@@ -598,17 +514,147 @@ impl HalState {
         })
     }
 
+    // TODO: Check all this to be correct
+    pub fn load_texture(&mut self, texture: &[u8]) -> Result<(), &'static str> {
+        let descriptor_set = {
+            if self.texture_pool.textures.len() == 0 {
+                let new_descriptor = unsafe {
+                    self.texture_pool
+                        .descriptor_pool
+                        .allocate_set(&self.texture_pool.descriptor_set_layouts[0])
+                        .map_err(|_| "Couldn't make a descriptor set!")?
+                };
+
+                let sampler = unsafe {
+                    match self.device.create_sampler(gfx_hal::image::SamplerInfo::new(
+                        gfx_hal::image::Filter::Nearest,
+                        gfx_hal::image::WrapMode::Tile,
+                    )) {
+                        Ok(sampler) => sampler,
+                        Err(_) => {
+                            self.texture_pool
+                                .descriptor_pool
+                                .free_sets(Some(new_descriptor));
+                            return Err("Couldn't create the sampler!");
+                        }
+                    }
+                };
+                self.texture_pool.descriptor_sets.push(new_descriptor);
+                self.texture_pool.samplers.push(ManuallyDrop::new(sampler));
+                let descriptor_set = &self.texture_pool.descriptor_sets.last().unwrap();
+                let sampler = &self.texture_pool.samplers.last().unwrap();
+
+                unsafe {
+                    self.device
+                        .write_descriptor_sets(Some(gfx_hal::pso::DescriptorSetWrite {
+                            // doing it this way to ensure that the descriptor set will be somewhere to get deallocated,
+                            // even if this function early returns
+                            set: *descriptor_set,
+                            binding: 1,
+                            array_offset: 0,
+                            descriptors: Some(gfx_hal::pso::Descriptor::Sampler(
+                                (*sampler).deref(),
+                            )),
+                        }));
+                }
+                &self.texture_pool.descriptor_sets[0] // this can never fail because we just pushed a new descriptor set
+            } else if self.texture_pool.textures.len()
+                == self.texture_pool.descriptor_sets.len() * self.texture_pool.descriptor_size
+            {
+                // this is when all current descriptor sets are full, so we allocate a new one
+                let new_descriptor = unsafe {
+                    self.texture_pool
+                        .descriptor_pool
+                        .allocate_set(&self.texture_pool.descriptor_set_layouts[0])
+                        .map_err(|_| "Couldn't make a descriptor set!")?
+                };
+
+                let sampler = unsafe {
+                    match self.device.create_sampler(gfx_hal::image::SamplerInfo::new(
+                        gfx_hal::image::Filter::Nearest,
+                        gfx_hal::image::WrapMode::Tile,
+                    )) {
+                        Ok(sampler) => sampler,
+                        Err(_) => {
+                            self.texture_pool
+                                .descriptor_pool
+                                .free_sets(Some(new_descriptor));
+                            return Err("Couldn't create the sampler!");
+                        }
+                    }
+                };
+                self.texture_pool.descriptor_sets.push(new_descriptor);
+                self.texture_pool.samplers.push(ManuallyDrop::new(sampler));
+                let descriptor_set = self.texture_pool.descriptor_sets.last().unwrap();
+                let sampler = self.texture_pool.samplers.last().unwrap();
+                unsafe {
+                    self.device
+                        .write_descriptor_sets(Some(gfx_hal::pso::DescriptorSetWrite {
+                            // doing it this way to ensure that the descriptor set will be somewhere to get deallocated,
+                            // even if this function early returns
+                            set: descriptor_set,
+                            binding: 1,
+                            array_offset: 0,
+                            descriptors: Some(gfx_hal::pso::Descriptor::Sampler(sampler.deref())),
+                        }));
+                }
+
+                descriptor_set // this can't fail because we just pushed a new descriptor set
+            } else {
+                self.texture_pool.descriptor_sets.last().unwrap() // this shouldn't be able to fail, I hope
+            }
+        };
+
+        let num_descriptor_sets = self.texture_pool.descriptor_sets.len();
+        let num_textures = self.texture_pool.textures.len();
+
+        let texture = LoadedImage::new(
+            &self._adapter,
+            self.device.deref(),
+            &mut self.command_pool,
+            &mut self.queue_group.queues[0],
+            image::load_from_memory(texture)
+                .map_err(|_| "invalid image!")?
+                .to_rgba(),
+        )?;
+
+        info!(self.logger, "writing to descriptor set...";
+              "array_offset" => num_textures % num_descriptor_sets,
+              "num_textures" => num_textures, "num_descriptor_sets" => num_descriptor_sets);
+
+        unsafe {
+            // Some used here since we're only writing one thing, and Some implements IntoIterator, which is what write_descriptor_sets uses anyway
+            self.device
+                .write_descriptor_sets(Some(gfx_hal::pso::DescriptorSetWrite {
+                    set: descriptor_set,
+                    binding: 0,
+                    // logic here is that hopefully the modulo will basically find which descriptor set we're supposed to write to
+                    // it probably works because they're all the same size
+                    array_offset: num_textures % (num_descriptor_sets * self.texture_pool.descriptor_size),
+                    descriptors: Some(gfx_hal::pso::Descriptor::Image(
+                        texture.image_view.deref(),
+                        Layout::Undefined,
+                    )),
+                }))
+        };
+
+        self.texture_pool.textures.push(texture);
+
+        info!(self.logger, "loaded texture"; "num_textures" => self.texture_pool.textures.len(),
+              "num_descriptor_sets" => self.texture_pool.descriptor_sets.len());
+
+        Ok(())
+    }
+
     pub fn extend_quad_alloc(&mut self, new_max: usize) -> Result<(), &'static str> {
-        
-        const F32_XY_RGB_UV_UVRECT_QUAD: usize = mem::size_of::<Vertex>() * 4;
-        if new_max as u64 > self.vertices.requirements.size / F32_XY_RGB_UV_UVRECT_QUAD as u64 {
+        if new_max as u64 > self.vertices.requirements.size / QUAD_SIZE as u64 {
             info!(&self.logger, "extending quad vertex/index buffer size"; "new_size" => new_max);
 
             unsafe {
                 let new_vertices = BufferBundle::new(
                     &self._adapter,
                     &*self.device,
-                    F32_XY_RGB_UV_UVRECT_QUAD * new_max,
+                    QUAD_SIZE * new_max,
                     BufferUsage::VERTEX,
                 )?;
                 const U16_QUAD_INDICES: usize = mem::size_of::<u16>() * 2 * 3;
@@ -654,15 +700,15 @@ impl HalState {
                 }
                 if let Err(_) = self.device.release_mapping_writer(data_target) {
                     new_vertices.manually_drop(&self.device);
-                        new_indexes.manually_drop(&self.device);
-                        return Err("Couldn't release the index buffer mapping writer!");
-                    }
-                    let old_vertex_buffer = mem::replace(&mut self.vertices, new_vertices);
-                    let old_index_buffer = mem::replace(&mut self.indexes, new_indexes);
-                    old_vertex_buffer.manually_drop(&self.device);
-                    old_index_buffer.manually_drop(&self.device);
-                    self.num_quads = new_max;
+                    new_indexes.manually_drop(&self.device);
+                    return Err("Couldn't release the index buffer mapping writer!");
                 }
+                let old_vertex_buffer = mem::replace(&mut self.vertices, new_vertices);
+                let old_index_buffer = mem::replace(&mut self.indexes, new_indexes);
+                old_vertex_buffer.manually_drop(&self.device);
+                old_index_buffer.manually_drop(&self.device);
+                self.num_quads = new_max;
+            }
         }
         Ok(())
     }
@@ -767,14 +813,17 @@ impl HalState {
                 )
                 .map_err(|_| "Failed to acquire a memory writer!")?;
             for i in 0..textured_quads.len().min(MAX_QUADS) {
-                let stride = (2 + 3 + 2 + 4) * 4;
-                data_target[stride * i..stride * (i + 1)]
-                    .copy_from_slice(&textured_quads[i].to_f32s());
+                let stride = 4;
+                data_target[4 * i..stride * (i + 1)]
+                    .copy_from_slice(&textured_quads[i].to_vertices());
             }
             self.device
                 .release_mapping_writer(data_target)
                 .map_err(|_| "Couldn't release the mapping writer")?;
         }
+
+        assert!(self.texture_pool.descriptor_sets.len() > 0);
+        assert!(self.texture_pool.textures.len() == 2);
 
         let uv_rect = textured_quads[0].uv_rect;
         // record commands
@@ -803,7 +852,7 @@ impl HalState {
                 encoder.bind_graphics_descriptor_sets(
                     &self.pipeline_layout,
                     0,
-                    Some(self.descriptor_set.deref()),
+                    Some(&self.texture_pool.descriptor_sets[0]),
                     &[],
                 );
                 encoder.push_graphics_constants(
@@ -842,20 +891,21 @@ impl HalState {
                 .map_err(|_| "Failed to present into the swapchain!")
         }
     }
-    
+
     fn create_pipeline(
         device: &mut back::Device,
         extent: Extent2D,
         render_pass: &<back::Backend as Backend>::RenderPass,
+        texture_count: usize,
         logger: &Logger,
     ) -> Result<
-            (
-                Vec<<back::Backend as Backend>::DescriptorSetLayout>,
-                <back::Backend as Backend>::PipelineLayout,
-                <back::Backend as Backend>::GraphicsPipeline,
-            ),
+        (
+            Vec<<back::Backend as Backend>::DescriptorSetLayout>,
+            <back::Backend as Backend>::PipelineLayout,
+            <back::Backend as Backend>::GraphicsPipeline,
+        ),
         &'static str,
-        > {
+    > {
         let mut compiler = shaderc::Compiler::new().ok_or("shaderc not found!")?;
         let vertex_compile_artifact = compiler
             .compile_into_spirv(
@@ -920,7 +970,7 @@ impl HalState {
         };
         let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
             binding: 0,
-            stride: (mem::size_of::<f32>() * (2 + 3 + 2 + 4)) as ElemStride,
+            stride: mem::size_of::<Vertex>() as ElemStride,
             rate: 0,
         }];
 
@@ -942,15 +992,15 @@ impl HalState {
         let blender = {
             // stuff that we were using before but yeah
             /* let blend_state = BlendState::On {
-            color: BlendOp::Add {
-            src: Factor::One,
-            dst: Factor::Zero,
-        },
-            alpha: BlendOp::Add {
-            src: Factor::One,
-            dst: Factor::Zero,
-        },
-        };*/
+                color: BlendOp::Add {
+                src: Factor::One,
+                dst: Factor::Zero,
+            },
+                alpha: BlendOp::Add {
+                src: Factor::One,
+                dst: Factor::Zero,
+            },
+            };*/
             BlendDesc {
                 logic_op: Some(LogicOp::Copy),
                 targets: vec![ColorBlendDesc(ColorMask::ALL, BlendState::ALPHA)],
@@ -969,7 +1019,7 @@ impl HalState {
         // Apparently these variables are unused, but yeah, gonna keep them as comments here just in case
         // let bindings = Vec::<DescriptorSetLayoutBinding>::new();
         // let immutable_samplers = Vec::<<back::Backend as Backend>::Sampler>::new();
-        
+
         // 1. you make a DescriptorSetLayout which is the layout of one descriptor
         //    set
         let descriptor_set_layouts: Vec<<back::Backend as Backend>::DescriptorSetLayout> =
@@ -980,7 +1030,7 @@ impl HalState {
                             DescriptorSetLayoutBinding {
                                 binding: 0,
                                 ty: gfx_hal::pso::DescriptorType::SampledImage,
-                                count: 1,
+                                count: texture_count,
                                 stage_flags: ShaderStageFlags::FRAGMENT | ShaderStageFlags::VERTEX,
                                 immutable_samplers: false,
                             },
@@ -1038,10 +1088,6 @@ impl core::ops::Drop for HalState {
         use core::ptr::read;
         let _ = self.device.wait_idle();
         unsafe {
-            for descriptor_set_layout in self.descriptor_set_layouts.drain(..) {
-                self.device
-                    .destroy_descriptor_set_layout(descriptor_set_layout);
-            }
             for in_flight_fence in self.in_flight_fences.drain(..) {
                 self.device.destroy_fence(in_flight_fence);
             }
@@ -1057,11 +1103,36 @@ impl core::ops::Drop for HalState {
             for image_view in self.image_views.drain(..) {
                 self.device.destroy_image_view(image_view);
             }
+
             self.vertices.manually_drop(self.device.deref());
             self.indexes.manually_drop(self.device.deref());
-            self.texture.manually_drop(self.device.deref());
-            self.device
-                .destroy_descriptor_pool(ManuallyDrop::into_inner(read(&self.descriptor_pool)));
+            {
+                let &mut TexturePool {
+                    ref mut descriptor_pool,
+                    ref mut textures,
+                    ref mut descriptor_set_layouts,
+                    ref mut samplers,
+                    ..
+                } = &mut self.texture_pool;
+
+                for texture in textures.drain(..) {
+                    texture.manually_drop(self.device.deref());
+                }
+
+                for sampler in samplers.drain(..) {
+                    self.device
+                        .destroy_sampler(ManuallyDrop::into_inner(sampler))
+                }
+
+                // this implicitly frees all the descript sets
+                self.device
+                    .destroy_descriptor_pool(ManuallyDrop::into_inner(read(descriptor_pool)));
+
+                for descriptor_set_layout in descriptor_set_layouts.drain(..) {
+                    self.device
+                        .destroy_descriptor_set_layout(descriptor_set_layout);
+                }
+            }
             self.device
                 .destroy_pipeline_layout(ManuallyDrop::into_inner(read(&self.pipeline_layout)));
             self.device

@@ -7,27 +7,15 @@ pub struct Rectangle {
 }
 
 impl Rectangle {
-    /// Yeah this should probably be used at some point, will remove if it never gets used when the project is becoming more stable 
+    /// Yeah this should probably be used at some point, will remove if it never gets used when the project is becoming more stable
     #[allow(dead_code)]
-    fn to_quad(self) -> Quad {
+    pub fn to_quad(self) -> Quad {
         let Rectangle { x, y, w, h } = self;
         Quad {
-            top_left: Point2D {
-                x: x,
-                y: y+h,
-            },
-            bottom_left: Point2D {
-                x: x,
-                y: y,
-            },
-            bottom_right: Point2D {
-                x: x+w,
-                y: y,
-            },
-            top_right: Point2D {
-                x: x+w,
-                y: y+h,
-            },
+            top_left: Point2D { x: x, y: y + h },
+            bottom_left: Point2D { x: x, y: y },
+            bottom_right: Point2D { x: x + w, y: y },
+            top_right: Point2D { x: x + w, y: y + h },
         }
     }
 }
@@ -37,81 +25,53 @@ impl Rectangle {
 #[repr(C)]
 pub struct Quad {
     pub top_left: Point2D,
-    pub bottom_left  : Point2D,
-    pub bottom_right : Point2D,
-    pub top_right    : Point2D,
+    pub bottom_left: Point2D,
+    pub bottom_right: Point2D,
+    pub top_right: Point2D,
 }
 
-    #[derive(Debug, Copy, Clone, PartialEq)]
-    pub struct Triangle {
-        points: [Point2D; 3]
-    }
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct Triangle {
+    points: [Point2D; 3],
+}
 
-    impl Quad {
-        pub fn vertex_attributes(self) -> [f32; 4 * (2 + 3 + 2)] {
-            let Quad { top_left, bottom_left, bottom_right, top_right } = self;
-            #[cfg_attr(rustfmt, rustfmt_skip)]
-            [/*
-             X               Y               R    G    B                  U    V                    */
-             top_left.x,     top_left.y,     1.0, 0.0, 0.0, /* red     */ 0.0, 1.0, /* bottom left  */
-             bottom_left.x,  bottom_left.y,  0.0, 1.0, 0.0, /* green   */ 0.0, 0.0, /* top left     */
-             bottom_right.x, bottom_right.y, 0.0, 0.0, 1.0, /* blue    */ 1.0, 0.0, /* bottom right */
-             top_right.x,    top_right.y,    1.0, 0.0, 1.0, /* magenta */ 1.0, 1.0, /* top right    */
-            ]
-        }
-    }
+impl Quad {
+    /*pub fn vertex_attributes(self) -> [Vertex; 4] {
+    let Quad {
+    top_left,
+    bottom_left,
+    bottom_right,
+    top_right,
+} = self;
+    #[cfg_attr(rustfmt, rustfmt_skip)]
+    [/*
+    X               Y               R    G    B                  U    V                    */
+    top_left.x,     top_left.y,     1.0, 0.0, 0.0, /* red     */ 0.0, 1.0, /* bottom left  */
+    bottom_left.x,  bottom_left.y,  0.0, 1.0, 0.0, /* green   */ 0.0, 0.0, /* top left     */
+    bottom_right.x, bottom_right.y, 0.0, 0.0, 1.0, /* blue    */ 1.0, 0.0, /* bottom right */
+    top_right.x,    top_right.y,    1.0, 0.0, 1.0, /* magenta */ 1.0, 1.0, /* top right    */
+]
+}*/
+}
 
-    impl Triangle {
-        pub fn points_flat(self) -> [f32; 6] {
-            let [[a, b], [c, d], [e, f]]: [[f32; 2]; 3] = self.into();
-            [a, b, c, d, e, f]
-        }
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct Point2D {
+    pub x: f32,
+    pub y: f32,
+}
 
-        pub fn vertex_attributes(self) -> [f32; 3 * (2 + 3)] {
-            let [[a, b], [c, d], [e, f]]: [[f32; 2]; 3] = self.into();
-            [
-                a, b, 1.0, 0.0, 0.0,
-                c, d, 0.0, 1.0, 0.0,
-                e, f, 0.0, 0.0, 1.0,
-            ]
-        }
+impl Into<[f32; 2]> for Point2D {
+    #[inline]
+    fn into(self) -> [f32; 2] {
+        [self.x, self.y]
     }
+}
 
-    #[derive(Debug, Copy, Clone, PartialEq)]
-    pub struct Point2D {
-        pub x: f32,
-        pub y: f32,
+impl From<[f32; 2]> for Point2D {
+    #[inline]
+    fn from(arr: [f32; 2]) -> Point2D {
+        let [x, y] = arr;
+        Point2D { x, y }
     }
+}
 
-    impl Into<[f32; 2]> for Point2D {
-        #[inline]
-        fn into(self) -> [f32; 2] {
-            [self.x, self.y]
-        }
-    }
-
-    impl From<[f32; 2]> for Point2D {
-        #[inline]
-        fn from(arr: [f32; 2]) -> Point2D {
-            let [x, y] = arr;
-            Point2D {
-                x, y
-            }
-        }
-    }
-
-    impl Into<[[f32; 2]; 3]> for Triangle {
-        #[inline]
-        fn into(self) -> [[f32; 2]; 3] {
-            let [a, b, c] = self.points;
-            [a.into(), b.into(), c.into()]
-        }
-    }
-
-    impl From<[[f32; 2]; 3]> for Triangle {
-        #[inline]
-        fn from(arr: [[f32; 2]; 3]) -> Triangle {
-            let [a, b, c] = arr;
-            Triangle { points: [a.into(), b.into(), c.into()] }
-        }
-    }
