@@ -42,6 +42,7 @@ pub struct BufferBundle<B: Backend, D: Device<B>> {
     pub buffer: ManuallyDrop<B::Buffer>,
     pub requirements: Requirements,
     pub memory: ManuallyDrop<B::Memory>,
+    pub phantom: PhantomData<D>,
 }
 
 impl<B: Backend, D: Device<B>> BufferBundle<B, D> {

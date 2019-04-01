@@ -20,7 +20,7 @@ impl Rectangle {
 }
 
 /// Quad of points
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(C)]
 pub struct Quad {
     pub top_left: Point2D,

@@ -3,6 +3,7 @@
 #[macro_use]
 extern crate slog;
 
+pub mod event;
 pub mod geometry;
 pub mod graphics;
 

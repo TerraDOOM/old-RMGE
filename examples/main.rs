@@ -8,12 +8,9 @@ extern crate slog_term;
 use slog::Drain;
 
 use gfx_hal::window::PresentMode::*;
-use winit::{Event, EventsLoop, Window, WindowEvent};
-
-use rmge::geometry::Rectangle;
-
-use rmge::graphics::HalState;
-use rmge::graphics::TexturedQuad;
+use rmge::graphics::{HalState, Rectangle, TexturedQuad};
+use std::time::{Duration, Instant};
+use winit::{DeviceEvent, Event, EventsLoop, KeyboardInput, Window, WindowEvent};
 
 #[derive(Debug, Clone, Default)]
 pub struct UserInput {
@@ -25,26 +22,29 @@ pub struct UserInput {
 impl UserInput {
     pub fn poll_events_loop(events_loop: &mut EventsLoop) -> Self {
         let mut output = UserInput::default();
-        events_loop.poll_events(|event| match event {
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => {
-                output.end_requested = true;
+        events_loop.poll_events(|event| {
+            println!("got event, {:?}", event);
+            match event {
+                Event::WindowEvent {
+                    event: WindowEvent::CloseRequested,
+                    ..
+                } => {
+                    output.end_requested = true;
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::Resized(logical),
+                    ..
+                } => {
+                    output.new_frame_size = Some((logical.width, logical.height));
+                }
+                Event::WindowEvent {
+                    event: WindowEvent::CursorMoved { position, .. },
+                    ..
+                } => {
+                    output.new_mouse_position = Some((position.x, position.y));
+                }
+                _ => (),
             }
-            Event::WindowEvent {
-                event: WindowEvent::Resized(logical),
-                ..
-            } => {
-                output.new_frame_size = Some((logical.width, logical.height));
-            }
-            Event::WindowEvent {
-                event: WindowEvent::CursorMoved { position, .. },
-                ..
-            } => {
-                output.new_mouse_position = Some((position.x, position.y));
-            }
-            _ => (),
         });
         output
     }
@@ -73,7 +73,7 @@ impl LocalState {
 fn do_the_quad_render(
     hal_state: &mut HalState,
     local_state: &LocalState,
-) -> Result<(), &'static str> {
+) -> Result<Instant, &'static str> {
     let x1 = 100.0;
     let y1 = 100.0;
     let x2 = local_state.mouse_x as f32;
@@ -88,7 +88,7 @@ fn do_the_quad_render(
         let Rectangle { x, y, w, h } = quad;
         Rectangle {
             x: x + 0.5,
-            y: y - 0.5,
+            y: y + 0.5,
             w,
             h,
         }
@@ -103,8 +103,9 @@ fn do_the_quad_render(
         uv_rect: [80.0, 0.0, 180.0, 30.0],
         tex_num: 1,
     };
-
-    hal_state.draw_quad_frame(&[textured_quad, textured_quad2])
+    hal_state.draw_quad_frame(&[textured_quad, textured_quad2])?;
+    let after = Instant::now();
+    Ok((after))
 }
 
 fn main() {
@@ -121,7 +122,7 @@ fn main() {
         &window,
         "rustmania",
         512,
-        [Mailbox, Fifo, Relaxed, Immediate],
+        [Immediate, Mailbox, Fifo, Relaxed],
         log.new(o!()),
     ) {
         Ok(state) => state,
@@ -144,6 +145,8 @@ fn main() {
         .load_texture(include_bytes!("judgment.png"))
         .unwrap();
 
+    let mut start = Instant::now();
+    let mut frames_this_second = 0;
     loop {
         let inputs = UserInput::poll_events_loop(&mut events_loop);
         if inputs.end_requested {
@@ -156,7 +159,7 @@ fn main() {
                 &window,
                 "rustmania",
                 512,
-                [Mailbox, Fifo, Relaxed, Immediate],
+                [Immediate, Mailbox, Fifo, Relaxed],
                 log.new(o!()),
             ) {
                 Ok(state) => state,
@@ -170,25 +173,36 @@ fn main() {
                 .unwrap();
         }
         local_state.update_from_input(inputs);
-        if let Err(e) = do_the_quad_render(&mut hal_state, &local_state) {
-            error!(&log, "render error"; "render_error" => e);
-            debug!(&log, "Auto-restarting HalState...");
-            hal_state = match HalState::new(
-                &window,
-                "rustmania",
-                512,
-                [Mailbox, Fifo, Relaxed, Immediate],
-                log.new(o!()),
-            ) {
-                Ok(state) => state,
-                Err(e) => panic!(e),
-            };
-            hal_state
-                .load_texture(include_bytes!("creature-smol.png"))
-                .unwrap();
-            hal_state
-                .load_texture(include_bytes!("judgment.png"))
-                .unwrap();
+        match do_the_quad_render(&mut hal_state, &local_state) {
+            Ok(instant) => {
+                if (instant - start) >= Duration::from_secs(1) {
+                    info!(log, "one second passed"; "fps" => frames_this_second);
+                    frames_this_second = 1;
+                    start = instant;
+                } else {
+                    frames_this_second += 1;
+                }
+            }
+            Err(e) => {
+                error!(&log, "render error"; "render_error" => e);
+                debug!(&log, "Auto-restarting HalState...");
+                hal_state = match HalState::new(
+                    &window,
+                    "rustmania",
+                    512,
+                    [Immediate, Mailbox, Fifo, Relaxed],
+                    log.new(o!()),
+                ) {
+                    Ok(state) => state,
+                    Err(e) => panic!(e),
+                };
+                hal_state
+                    .load_texture(include_bytes!("creature-smol.png"))
+                    .unwrap();
+                hal_state
+                    .load_texture(include_bytes!("judgment.png"))
+                    .unwrap();
+            }
         }
     }
 }

@@ -52,7 +52,7 @@ const VERTEX_SOURCE: &str = include_str!("vertex.glsl");
 const FRAGMENT_SOURCE: &str = include_str!("fragment.glsl");
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct TexturedQuad {
     pub quad: Quad,
     pub uv_rect: [f32; 4],
@@ -803,9 +803,6 @@ impl HalState {
                 .release_mapping_writer(data_target)
                 .map_err(|_| "Couldn't release the mapping writer")?;
         }
-
-        assert!(self.texture_pool.descriptor_sets.len() > 0);
-        assert!(self.texture_pool.textures.len() == 2);
 
         let uv_rect = textured_quads[0].uv_rect;
         // record commands
