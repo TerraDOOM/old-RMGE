@@ -8,7 +8,8 @@ extern crate slog_term;
 use slog::Drain;
 
 use gfx_hal::window::PresentMode::*;
-use rmge::graphics::{HalState, Rectangle, TexturedQuad};
+use rmge::geometry::Rectangle;
+use rmge::graphics::{HalState, TexturedQuad};
 use std::time::{Duration, Instant};
 use winit::{DeviceEvent, Event, EventsLoop, KeyboardInput, Window, WindowEvent};
 
