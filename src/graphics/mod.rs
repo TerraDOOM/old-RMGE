@@ -27,15 +27,15 @@ use gfx_hal::{
     command::{ClearColor, ClearValue, CommandBuffer, MultiShot, Primary},
     device::Device,
     format::{Aspects, ChannelType, Format, Swizzle},
-    image::{Extent, Layout, SubresourceRange, Usage, ViewKind},
+    image::{Extent, Filter, Layout, SubresourceRange, Usage, ViewKind},
     pass::{Attachment, AttachmentLoadOp, AttachmentOps, AttachmentStoreOp, Subpass, SubpassDesc},
     pool::{CommandPool, CommandPoolCreateFlags},
     pso::{
         AttributeDesc, BakedStates, BasePipeline, BlendDesc, BlendState, ColorBlendDesc, ColorMask,
         DepthStencilDesc, DepthTest, DescriptorSetLayoutBinding, ElemStride, EntryPoint, Face,
         FrontFace, GraphicsPipelineDesc, GraphicsShaderSet, InputAssemblerDesc, LogicOp,
-        PipelineCreationFlags, PipelineStage, PolygonMode, Rasterizer, Rect, ShaderStageFlags,
-        Specialization, StencilTest, VertexBufferDesc, Viewport,
+        Multisampling, PipelineCreationFlags, PipelineStage, PolygonMode, Rasterizer, Rect,
+        ShaderStageFlags, Specialization, StencilTest, VertexBufferDesc, Viewport,
     },
     queue::{family::QueueGroup, Submission},
     window::{Backbuffer, Extent2D, FrameSync, PresentMode, Swapchain, SwapchainConfig},
@@ -117,7 +117,23 @@ impl Into<PresentMode> for Vsync {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SamplingConfig {
+    pub multisampling: Option<u8>, // number of samples
+    pub filter_type: Option<Filter>,
+}
+
+impl Default for SamplingConfig {
+    fn default() -> Self {
+        SamplingConfig {
+            multisampling: None,
+            filter_type: None,
+        }
+    }
+}
+
 pub struct HalState {
+    sampling_config: SamplingConfig,
     num_quads: usize,
     vertices: BufferBundle<back::Backend, back::Device>,
     indexes: BufferBundle<back::Backend, back::Device>,
@@ -156,6 +172,7 @@ impl HalState {
         name: &str,
         num_quads: usize,
         preferred_vsync: [PresentMode; 4],
+        mut sampling_config: SamplingConfig,
         logger: slog::Logger,
     ) -> Result<Self, &'static str> {
         let instance = back::Instance::create(name, 1);
@@ -274,6 +291,40 @@ impl HalState {
             (swapchain, extent, backbuffer, format, image_count as usize)
         };
 
+        let max_samples = {
+            let samples = adapter
+                .physical_device
+                .limits()
+                .framebuffer_color_samples_count;
+            if samples & (1 << 7) != 0 {
+                samples & (1 << 7)
+            } else if samples & (1 << 6) != 0 {
+                samples & (1 << 6)
+            } else if samples & (1 << 5) != 0 {
+                samples & (1 << 5)
+            } else if samples & (1 << 4) != 0 {
+                samples & (1 << 4)
+            } else if samples & (1 << 3) != 0 {
+                samples & (1 << 3)
+            } else if samples & (1 << 2) != 0 {
+                samples & (1 << 2)
+            } else if samples & (1 << 1) != 0 {
+                samples & (1 << 1)
+            } else {
+                1
+            }
+        };
+        if let Some(samples) = sampling_config.multisampling {
+            info!(logger, "set sampling to {}", samples.min(max_samples); "wanted_sampling" => samples, "max_sampling" => max_samples);
+            if samples > max_samples {
+                warn!(
+                    logger,
+                    "wanted number of samples not supported by the system, using maximum possible"
+                );
+            }
+            sampling_config.multisampling = Some(samples.min(max_samples));
+        }
+
         let (image_available_semaphores, render_finished_semaphores, in_flight_fences) = {
             let mut image_available_semaphores: Vec<<back::Backend as Backend>::Semaphore> = vec![];
             let mut render_finished_semaphores: Vec<<back::Backend as Backend>::Semaphore> = vec![];
@@ -304,7 +355,7 @@ impl HalState {
         let render_pass = {
             let color_attachment = Attachment {
                 format: Some(format),
-                samples: 1,
+                samples: sampling_config.multisampling.unwrap_or(1),
                 ops: AttachmentOps {
                     load: AttachmentLoadOp::Clear,
                     store: AttachmentStoreOp::Store,
@@ -382,6 +433,7 @@ impl HalState {
             extent,
             &render_pass,
             DESCRIPTOR_SET_IMAGE_COUNT,
+            sampling_config.multisampling,
             &logger,
         )?;
 
@@ -468,6 +520,7 @@ impl HalState {
         }
 
         Ok(HalState {
+            sampling_config,
             num_quads,
             vertices,
             indexes,
@@ -505,12 +558,13 @@ impl HalState {
                         .allocate_set(&self.texture_pool.descriptor_set_layouts[0])
                         .map_err(|_| "Couldn't make a descriptor set!")?
                 };
+                let mut samplerinfo = gfx_hal::image::SamplerInfo::new(
+                    self.sampling_config.filter_type.unwrap_or(Filter::Nearest),
+                    gfx_hal::image::WrapMode::Tile,
+                );
 
                 let sampler = unsafe {
-                    match self.device.create_sampler(gfx_hal::image::SamplerInfo::new(
-                        gfx_hal::image::Filter::Nearest,
-                        gfx_hal::image::WrapMode::Tile,
-                    )) {
+                    match self.device.create_sampler(samplerinfo) {
                         Ok(sampler) => sampler,
                         Err(_) => {
                             self.texture_pool
@@ -550,11 +604,14 @@ impl HalState {
                         .map_err(|_| "Couldn't make a descriptor set!")?
                 };
 
+                let mut samplerinfo = gfx_hal::image::SamplerInfo::new(
+                    self.sampling_config.filter_type.unwrap_or(Filter::Nearest),
+                    gfx_hal::image::WrapMode::Tile,
+                );
+                samplerinfo.anisotropic = gfx_hal::image::Anisotropic::On(8);
+
                 let sampler = unsafe {
-                    match self.device.create_sampler(gfx_hal::image::SamplerInfo::new(
-                        gfx_hal::image::Filter::Nearest,
-                        gfx_hal::image::WrapMode::Tile,
-                    )) {
+                    match self.device.create_sampler(samplerinfo) {
                         Ok(sampler) => sampler,
                         Err(_) => {
                             self.texture_pool
@@ -876,6 +933,7 @@ impl HalState {
         extent: Extent2D,
         render_pass: &<back::Backend as Backend>::RenderPass,
         texture_count: usize,
+        samples: Option<u8>,
         logger: &Logger,
     ) -> Result<
         (
@@ -1032,6 +1090,19 @@ impl HalState {
                 .create_pipeline_layout(&descriptor_set_layouts, push_constants)
                 .map_err(|_| "Couldn't create pipeline layout!")?
         };
+
+        let multisampling = if let Some(samples) = samples {
+            Some(Multisampling {
+                rasterization_samples: samples, // 8x samples?
+                sample_shading: None,
+                sample_mask: core::u64::MAX,
+                alpha_coverage: true,
+                alpha_to_one: false,
+            })
+        } else {
+            None
+        };
+
         let gfx_pipeline = {
             let desc = GraphicsPipelineDesc {
                 shaders,
@@ -1042,7 +1113,7 @@ impl HalState {
                 blender,
                 depth_stencil,
                 layout: &layout,
-                multisampling: None,
+                multisampling,
                 baked_states,
                 subpass: Subpass {
                     index: 0,

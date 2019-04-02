@@ -9,9 +9,9 @@ use slog::Drain;
 
 use gfx_hal::window::PresentMode::*;
 use rmge::geometry::Rectangle;
-use rmge::graphics::{HalState, TexturedQuad};
+use rmge::graphics::{HalState, SamplingConfig, TexturedQuad};
 use std::time::{Duration, Instant};
-use winit::{DeviceEvent, Event, EventsLoop, KeyboardInput, Window, WindowEvent};
+use winit::{Event, EventsLoop, Window, WindowEvent};
 
 #[derive(Debug, Clone, Default)]
 pub struct UserInput {
@@ -20,32 +20,46 @@ pub struct UserInput {
     new_mouse_position: Option<(f64, f64)>,
 }
 
+fn create_halstate(window: &Window, log: &slog::Logger) -> HalState {
+    match HalState::new(
+        &window,
+        "rustmania",
+        512,
+        [Mailbox, Fifo, Relaxed, Immediate],
+        SamplingConfig {
+            multisampling: Some(16),
+            filter_type: Some(gfx_hal::image::Filter::Linear),
+        },
+        log.new(o!()),
+    ) {
+        Ok(state) => state,
+        Err(e) => panic!(e),
+    }
+}
+
 impl UserInput {
     pub fn poll_events_loop(events_loop: &mut EventsLoop) -> Self {
         let mut output = UserInput::default();
-        events_loop.poll_events(|event| {
-            println!("got event, {:?}", event);
-            match event {
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                } => {
-                    output.end_requested = true;
-                }
-                Event::WindowEvent {
-                    event: WindowEvent::Resized(logical),
-                    ..
-                } => {
-                    output.new_frame_size = Some((logical.width, logical.height));
-                }
-                Event::WindowEvent {
-                    event: WindowEvent::CursorMoved { position, .. },
-                    ..
-                } => {
-                    output.new_mouse_position = Some((position.x, position.y));
-                }
-                _ => (),
+        events_loop.poll_events(|event| match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                output.end_requested = true;
             }
+            Event::WindowEvent {
+                event: WindowEvent::Resized(logical),
+                ..
+            } => {
+                output.new_frame_size = Some((logical.width, logical.height));
+            }
+            Event::WindowEvent {
+                event: WindowEvent::CursorMoved { position, .. },
+                ..
+            } => {
+                output.new_mouse_position = Some((position.x, position.y));
+            }
+            _ => (),
         });
         output
     }
@@ -106,7 +120,7 @@ fn do_the_quad_render(
     };
     hal_state.draw_quad_frame(&[textured_quad, textured_quad2])?;
     let after = Instant::now();
-    Ok((after))
+    Ok(after)
 }
 
 fn main() {
@@ -119,16 +133,8 @@ fn main() {
     let log = slog::Logger::root(drain, o!());
 
     let mut window = Window::new(&events_loop).unwrap();
-    let mut hal_state = match HalState::new(
-        &window,
-        "rustmania",
-        512,
-        [Immediate, Mailbox, Fifo, Relaxed],
-        log.new(o!()),
-    ) {
-        Ok(state) => state,
-        Err(e) => panic!(e),
-    };
+    let mut hal_state = create_halstate(&window, &log);
+
     let (frame_width, frame_height) = window
         .get_inner_size()
         .map(|logical| logical.into())
@@ -139,6 +145,7 @@ fn main() {
         mouse_x: 0.0,
         mouse_y: 0.0,
     };
+
     hal_state
         .load_texture(include_bytes!("creature-smol.png"))
         .unwrap();
@@ -156,16 +163,7 @@ fn main() {
         if let Some(a) = inputs.new_frame_size {
             debug!(&log, "Window changed size"; o!("x" => a.0, "y" => a.1));
             core::mem::drop(hal_state);
-            hal_state = match HalState::new(
-                &window,
-                "rustmania",
-                512,
-                [Immediate, Mailbox, Fifo, Relaxed],
-                log.new(o!()),
-            ) {
-                Ok(state) => state,
-                Err(e) => panic!(e),
-            };
+            hal_state = create_halstate(&window, &log);
             hal_state
                 .load_texture(include_bytes!("creature-smol.png"))
                 .unwrap();
@@ -187,16 +185,7 @@ fn main() {
             Err(e) => {
                 error!(&log, "render error"; "render_error" => e);
                 debug!(&log, "Auto-restarting HalState...");
-                hal_state = match HalState::new(
-                    &window,
-                    "rustmania",
-                    512,
-                    [Immediate, Mailbox, Fifo, Relaxed],
-                    log.new(o!()),
-                ) {
-                    Ok(state) => state,
-                    Err(e) => panic!(e),
-                };
+                hal_state = create_halstate(&window, &log);
                 hal_state
                     .load_texture(include_bytes!("creature-smol.png"))
                     .unwrap();
