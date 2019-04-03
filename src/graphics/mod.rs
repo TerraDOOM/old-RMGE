@@ -186,7 +186,7 @@ impl HalState {
                     .any(|qf| qf.supports_graphics() && surface.supports_queue_family(qf))
             })
             .ok_or("Couldn't find a graphical Adapter!")?;
-        let (mut device, mut queue_group) = {
+        let (mut device, queue_group) = {
             let queue_family = adapter
                 .queue_families
                 .iter()
@@ -442,7 +442,7 @@ impl HalState {
         //    you specify how many sets you want to be able to allocate from the
         //    pool, as well as the maximum number of each kind of descriptor you
         //    want to be able to allocate from that pool, total, for all sets.
-        let mut descriptor_pool = ManuallyDrop::new(unsafe {
+        let descriptor_pool = ManuallyDrop::new(unsafe {
             device
                 .create_descriptor_pool(
                     DESCRIPTOR_SET_COUNT, // sets
@@ -558,7 +558,7 @@ impl HalState {
                         .allocate_set(&self.texture_pool.descriptor_set_layouts[0])
                         .map_err(|_| "Couldn't make a descriptor set!")?
                 };
-                let mut samplerinfo = gfx_hal::image::SamplerInfo::new(
+                let samplerinfo = gfx_hal::image::SamplerInfo::new(
                     self.sampling_config.filter_type.unwrap_or(Filter::Nearest),
                     gfx_hal::image::WrapMode::Tile,
                 );

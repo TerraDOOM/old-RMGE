@@ -12,7 +12,7 @@ pub trait EventHandler {
     fn mouse_wheel(&mut self, _time: Instant, _scroll: MouseScrollDelta) {}
     /// This function is run whenever the user changes focus. The return value is whether to suspend the event loop while unfocused.
     /// Default is to suspend the eventloop
-    fn window_focused(&mut self, time: Instant, focused: bool) -> bool {
+    fn window_focused(&mut self, _time: Instant, focused: bool) -> bool {
         !focused
     }
     fn quit(&mut self) -> bool {

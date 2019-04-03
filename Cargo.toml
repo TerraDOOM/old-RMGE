@@ -9,9 +9,9 @@ gfx-hal = "0.1.0"
 image = "0.21"
 shaderc = "0.3"
 slog = "2.4.1"
-slog-stdlog = "3.0.2"
 winit = "0.18"
 failure = "0.1"
+vek = "0.9"
 
 [dependencies.gfx-backend-vulkan]
 optional = true
@@ -20,6 +20,8 @@ version = "0.1"
 [dev-dependencies]
 slog-async = "2.3.0"
 slog-term = "2.4.0"
+slog-stdlog = "3.0.2"
+
 
 [badges]
 travis-ci = { repository = "TerraDOOM/RMGE" }

@@ -7,4 +7,4 @@ pub mod event;
 pub mod geometry;
 pub mod graphics;
 
-use crate::graphics::HalState;
+pub use crate::graphics::HalState;
